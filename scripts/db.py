@@ -159,6 +159,51 @@ def update_run_stats(run_id: int, tokens_in: int, tokens_out: int,
     conn.close()
 
 
+def update_input_stats(input_id: int, tokens_in: int, tokens_out: int,
+                       duration_sec: float) -> None:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE inputs SET tokens_in=%s, tokens_out=%s, duration_sec=%s WHERE id=%s",
+        (tokens_in, tokens_out, round(duration_sec, 2), input_id)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def get_source_files(limit: int = 30) -> list:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, filename, row_count, file_size, created_at
+        FROM source_files
+        ORDER BY created_at DESC
+        LIMIT %s
+    """, (limit,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [
+        {"id": r[0], "filename": r[1], "row_count": r[2],
+         "file_size": r[3], "created_at": str(r[4])}
+        for r in rows
+    ]
+
+
+def get_source_file_content(sf_id: int) -> tuple[str, str]:
+    """Returns (filename, csv_content)."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT filename, content FROM source_files WHERE id=%s", (sf_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        raise ValueError(f"Source file {sf_id} not found")
+    return row[0], row[1]
+
+
 def update_run_total(run_id: int, total: int):
     conn = get_conn()
     cur = conn.cursor()

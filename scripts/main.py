@@ -2,7 +2,9 @@ import json
 import os
 import sys
 import time
+import threading
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 import pandas as pd
@@ -13,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
 from db import (init_schema, get_or_create_config, create_run, update_run_total,
-                update_run_stats, save_source_file, save_source_file_from_content,
+                update_run_stats, update_input_stats,
+                save_source_file, save_source_file_from_content,
                 save_input, save_extraction, save_generation, set_ranks)
 from extract import extract
 from generate import generate_variants, assemble_email
@@ -83,6 +86,7 @@ def load_config(config_file: str) -> dict:
 
 def process_baseline(row: dict, run_id: int, config_id: int,
                      log_fn=print) -> tuple[dict, dict]:
+    lead_start = time.monotonic()
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
     input_id = save_input(run_id, row)
 
@@ -113,11 +117,14 @@ def process_baseline(row: dict, run_id: int, config_id: int,
         set_ranks([variants[i]["gen_id"] for i in ranked])
         log_fn(f"  best baseline score: {variants[ranked[0]]['score']}")
 
+    update_input_stats(input_id, usage["prompt_tokens"], usage["completion_tokens"],
+                       time.monotonic() - lead_start)
+
     result = {
-        "first_name": row.get("first_name"),
-        "last_name":  row.get("last_name"),
-        "email":      row.get("email"),
-        "company_name": row.get("company_name"),
+        "first_name":       row.get("first_name"),
+        "last_name":        row.get("last_name"),
+        "email":            row.get("email"),
+        "company_name":     row.get("company_name"),
         "baseline_1_score": variants[0]["score"] if len(variants) > 0 else None,
         "baseline_2_score": variants[1]["score"] if len(variants) > 1 else None,
         "baseline_3_score": variants[2]["score"] if len(variants) > 2 else None,
@@ -129,6 +136,7 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str,
                      log_fn=print, batch_prompt_file: str = None,
                      variant_count: int = 3,
                      temperature_generation: float = 0.6) -> tuple[dict, dict]:
+    lead_start = time.monotonic()
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
     company_info = "\n\n".join(filter(None, [
@@ -182,11 +190,14 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str,
     best = variants[best_idx]
     log_fn(f"  best: {ANGLES[best_idx]} (score {best['score']})")
 
+    update_input_stats(input_id, usage["prompt_tokens"], usage["completion_tokens"],
+                       time.monotonic() - lead_start)
+
     result = {
-        "first_name": row.get("first_name"),
-        "last_name":  row.get("last_name"),
-        "email":      row.get("email"),
-        "company_name": row.get("company_name"),
+        "first_name":      row.get("first_name"),
+        "last_name":       row.get("last_name"),
+        "email":           row.get("email"),
+        "company_name":    row.get("company_name"),
         "best_angle":      ANGLES[best_idx] if best_idx < len(ANGLES) else "",
         "best_score":      best["score"],
         "best_full_email": best["full_email"],
@@ -211,6 +222,7 @@ def run(
     variant_count: int = 3,
     temperature_generation: float = 0.6,
     source_type: str = "cli",
+    max_workers: int = 1,
 ) -> list:
     init_schema()
 
@@ -236,40 +248,61 @@ def run(
     run_id = create_run(config_id, source_label, source_file_id, source_type=source_type)
     update_run_total(run_id, len(df))
 
-    log_fn(f"run_id={run_id} | mode={mode} | source={source_type} | {len(df)} leads\n")
+    log_fn(f"run_id={run_id} | mode={mode} | source={source_type} | workers={max_workers} | {len(df)} leads\n")
+
+    # thread-safe logging
+    log_lock = threading.Lock()
+    def safe_log(msg):
+        with log_lock:
+            log_fn(msg)
 
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0}
+    usage_lock = threading.Lock()
     errors = []
     started_at = time.monotonic()
-    results = []
 
-    for idx, row in df.iterrows():
+    rows = [(idx, row.to_dict()) for idx, row in df.iterrows()]
+    total = len(rows)
+    results = [None] * total
+
+    def process_one(pos: int, idx: int, row: dict):
         name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
-        log_fn(f"[{idx+1}/{len(df)}] {name} — {row.get('company_name', '')}")
+        safe_log(f"[{pos+1}/{total}] {name} — {row.get('company_name', '')}")
         try:
             if mode == "baseline":
-                result, usage = process_baseline(row.to_dict(), run_id, config_id, log_fn)
+                result, usage = process_baseline(row, run_id, config_id, safe_log)
             else:
                 result, usage = process_generate(
-                    row.to_dict(), run_id, config_id, niche, log_fn,
+                    row, run_id, config_id, niche, safe_log,
                     batch_prompt_file=batch_prompt_file,
                     variant_count=variant_count,
                     temperature_generation=temperature_generation,
                 )
-            _add_usage(total_usage, usage)
-            results.append(result)
+            with usage_lock:
+                _add_usage(total_usage, usage)
+            return pos, result, None
         except Exception as e:
             err = {
-                "email":      row.get("email", ""),
-                "company":    row.get("company_name", ""),
-                "step":       mode,
-                "message":    str(e),
-                "timestamp":  datetime.now(timezone.utc).isoformat(),
+                "email":     row.get("email", ""),
+                "company":   row.get("company_name", ""),
+                "step":      mode,
+                "message":   str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            errors.append(err)
-            log_fn(f"  ERROR: {e}")
-            results.append({"email": row.get("email"), "company_name": row.get("company_name"),
-                            "error": str(e)})
+            safe_log(f"  ERROR: {e}")
+            return pos, {"email": row.get("email"), "company_name": row.get("company_name"),
+                         "error": str(e)}, err
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(process_one, pos, idx, row): pos
+            for pos, (idx, row) in enumerate(rows)
+        }
+        for future in as_completed(futures):
+            pos, result, err = future.result()
+            results[pos] = result
+            if err:
+                errors.append(err)
 
     duration_sec = time.monotonic() - started_at
     cost_usd = _calc_cost(model, total_usage["prompt_tokens"], total_usage["completion_tokens"])
@@ -286,7 +319,7 @@ def run(
 
     cost_str = f"${cost_usd:.4f}" if cost_usd is not None else "cost unknown"
     log_fn(
-        f"\nDone. {len(results)} leads | {duration_sec:.1f}s | "
+        f"\nDone. {total} leads | {duration_sec:.1f}s | "
         f"{total_usage['prompt_tokens']}in/{total_usage['completion_tokens']}out tokens | {cost_str}"
     )
 
@@ -304,6 +337,8 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="configs/recruiting_v1.json")
     parser.add_argument("--mode", default="generate", choices=["generate", "baseline"])
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
 
-    run(args.input, args.output, args.config, args.mode, args.limit, source_type="cli")
+    run(args.input, args.output, args.config, args.mode, args.limit,
+        source_type="cli", max_workers=args.workers)

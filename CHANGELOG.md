@@ -7,10 +7,26 @@
 ## [Unreleased]
 
 ### Planned
-- **Parallelism** — `ThreadPoolExecutor` in `run()`, ~10–20 concurrent leads. 400 leads: 50 min → 3–5 min. Groq limit: 1000 RPM / 250K TPM.
-- **Per-lead token tracking** — currently tokens are aggregated per run. Could add `tokens_in/out` to `generations` table for granular cost breakdown per lead.
 - **Retry logic** — exponential backoff on Groq rate limit errors (429).
 - **Email preview in Streamlit** — click a lead in results table → see full email rendered.
+
+---
+
+## [0.9.0] - 2026-03-23 - Parallelism, batch management, per-lead stats
+
+### Added
+- **Parallelism** — `ThreadPoolExecutor` in `run()`, configurable `max_workers` (1–10). CLI: `--workers N`. Streamlit: slider in sidebar. 400 leads: ~50 min → ~5 min at workers=10.
+- **Batch management tab** in Streamlit — CSV saved to `source_files` immediately on upload (before running). Batches tab shows all uploads, "Load this batch" loads it into Run tab without re-uploading.
+- `db.get_source_files()` — list of uploaded batches with filename, row count, size, date
+- `db.get_source_file_content()` — fetch raw CSV from DB by source_file_id
+- `db.update_input_stats()` — writes per-lead tokens and duration to `inputs` table
+- `migrations/005_per_lead_stats.sql` — adds `tokens_in`, `tokens_out`, `duration_sec` to `inputs`
+- Thread-safe logging — `log_lock` prevents garbled output when workers > 1
+
+### Changed
+- `process_generate()` / `process_baseline()` — track lead-level timing, call `update_input_stats()` at end
+- `run()` — uses `ThreadPoolExecutor`, results collected by position (order preserved), usage accumulated with `usage_lock`
+- `app.py` — `init_schema()` called once at startup, not per run. Parallel workers slider added.
 
 ---
 
