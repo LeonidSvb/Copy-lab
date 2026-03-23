@@ -18,14 +18,15 @@ from db import (init_schema, get_runs, get_run_results,
                 get_source_files, get_source_file_content,
                 get_runs_for_source_file,
                 find_source_file_by_hash, find_source_files_by_name,
-                save_source_file_from_content)
-from main import run, load_config, COLUMN_MAP
+                save_source_file_from_content,
+                get_prompts, save_prompt, delete_prompt)
+from main import run, load_config, COLUMN_MAP, DEFAULT_CONTEXT_COLUMNS
 
 # init DB schema once on startup
 try:
     init_schema()
-except Exception:
-    pass
+except Exception as e:
+    st.warning(f"DB schema init error: {e}")
 
 st.set_page_config(page_title="IceGen", layout="wide")
 st.title("IceGen")
@@ -52,27 +53,6 @@ mode = st.sidebar.radio("Mode", ["generate", "baseline"])
 st.sidebar.divider()
 st.sidebar.subheader("Generation settings")
 
-prompt_files = sorted((ROOT / "prompts").glob("*.txt"))
-generation_prompts = [
-    f for f in prompt_files
-    if f.name not in ("extraction.txt", "evaluation.txt", "blocks.txt")
-]
-prompt_names = [f.stem for f in generation_prompts]
-default_prompt = next(
-    (i for i, f in enumerate(generation_prompts) if "batch01" in f.name), 0
-)
-selected_prompt_name = st.sidebar.selectbox(
-    "Generation prompt", prompt_names, index=default_prompt,
-    disabled=(mode == "baseline"),
-)
-selected_prompt_path = str(ROOT / "prompts" / f"{selected_prompt_name}.txt")
-
-with st.sidebar.expander("Preview prompt"):
-    try:
-        st.code(open(selected_prompt_path).read(), language=None)
-    except Exception:
-        st.warning("Could not read prompt file.")
-
 variant_count = st.sidebar.slider(
     "Variants per lead", min_value=1, max_value=6, value=3,
     disabled=(mode == "baseline"),
@@ -86,9 +66,13 @@ max_workers = st.sidebar.slider(
     help="1 = sequential. 5-10 for large batches. Watch Groq rate limits.",
 )
 
+# active prompt text — resolved in Run tab when CSV is loaded
+selected_prompt_text = None  # set below in Run tab prompt editor
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str):
+def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str,
+                  prompt_text: str = None, context_columns: list = None):
     log_lines = []
     log_lock  = threading.Lock()
 
@@ -117,7 +101,8 @@ def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str
                 csv_filename=filename,
                 csv_content=csv_content,
                 output_csv=None,
-                batch_prompt_file=selected_prompt_path,
+                prompt_text=prompt_text,
+                context_columns=context_columns,
                 variant_count=variant_count,
                 temperature_generation=temperature,
                 source_type="streamlit",
@@ -170,34 +155,100 @@ def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str
     ui_eta.metric("ETA",              "Done")
     # ──────────────────────────────────────────────────────────────────────────
 
+    # show error if any — but don't block results from displaying
     if shared["error"]:
-        st.error(f"Pipeline error: {shared['error']}")
-    elif shared["results"] is not None:
+        st.error(f"Pipeline error:\n\n```\n{shared['error']}\n```")
+
+    # save results regardless — run may have partially or fully succeeded
+    if shared["results"] is not None:
         st.session_state["results"]          = shared["results"]
         st.session_state["results_label"]    = label
         st.session_state["results_filename"] = filename
+        st.session_state["results_elapsed"]  = elapsed
+        st.session_state["results_total"]    = total
 
     if log_lines:
+        log_text = "\n".join(log_lines)
         with st.expander("Run log", expanded=bool(shared["error"])):
-            st.code("\n".join(log_lines))
+            st.text_area("", log_text, height=300, key="log_display")
+            st.download_button(
+                "Download log as .txt",
+                log_text.encode("utf-8"),
+                file_name=f"log_{filename}.txt",
+                mime="text/plain",
+                key="dl_log",
+            )
 
 
 def _show_results():
-    results = st.session_state.get("results")
+    results  = st.session_state.get("results")
     if not results:
         return
     label    = st.session_state.get("results_label", "Run")
     filename = st.session_state.get("results_filename", "output")
+    elapsed  = st.session_state.get("results_elapsed")
+    total    = st.session_state.get("results_total", len(results))
 
     st.success(f"{label} — {len(results)} leads processed.")
+
+    # ── run stats ─────────────────────────────────────────────────────────────
     results_df = pd.DataFrame(results)
+    failed = results_df["best_full_email"].str.contains("INSUFFICIENT_DATA", na=False).sum() \
+        if "best_full_email" in results_df.columns else 0
+    good   = total - failed
+
+    mc = st.columns(4)
+    mc[0].metric("Total leads", total)
+    mc[1].metric("Generated OK", good)
+    mc[2].metric("Failed (INSUFFICIENT_DATA)", failed)
+    mc[3].metric("Duration", f"{elapsed:.0f}s" if elapsed else "—")
+
+    if "best_score" in results_df.columns:
+        sc = st.columns(3)
+        valid_scores = results_df[results_df["best_score"] > 0]["best_score"]
+        sc[0].metric("Avg score (all)", f"{results_df['best_score'].mean():.1f}")
+        sc[1].metric("Avg score (non-zero)", f"{valid_scores.mean():.1f}" if len(valid_scores) else "—")
+        sc[2].metric("Leads score > 5", f"{(results_df['best_score'] > 5).sum()} / {total}")
+
+    # ── table + actions ───────────────────────────────────────────────────────
     st.dataframe(results_df, use_container_width=True)
 
-    csv_out = results_df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download results CSV", csv_out,
-        file_name=f"output_{filename}", mime="text/csv", key="dl_results",
-    )
+    col_dl, col_regen = st.columns([1, 1])
+    with col_dl:
+        csv_out = results_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download results CSV", csv_out,
+            file_name=f"output_{filename}", mime="text/csv", key="dl_results",
+        )
+    with col_regen:
+        if failed > 0:
+            if st.button(f"Regenerate {failed} failed leads", use_container_width=True):
+                csv_content  = st.session_state.get("csv_content")
+                csv_filename = st.session_state.get("csv_filename", filename)
+                if csv_content:
+                    # filter only leads that failed
+                    failed_emails = results_df[
+                        results_df.get("best_full_email", pd.Series()).str.contains(
+                            "INSUFFICIENT_DATA", na=False
+                        )
+                    ]["email"].tolist() if "email" in results_df.columns else []
+
+                    df_all  = pd.read_csv(io.StringIO(csv_content))
+                    df_all  = df_all.rename(columns=COLUMN_MAP)
+                    if failed_emails:
+                        df_failed = df_all[df_all["email"].isin(failed_emails)]
+                    else:
+                        df_failed = df_all
+
+                    failed_csv = df_failed.rename(
+                        columns={v: k for k, v in COLUMN_MAP.items()}
+                    ).to_csv(index=False)
+                    _run_pipeline(
+                        failed_csv, csv_filename,
+                        None, f"Regenerate ({len(df_failed)} failed leads)"
+                    )
+                else:
+                    st.warning("Original CSV not in session — upload it again first.")
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 
@@ -205,17 +256,22 @@ tab_run, tab_batches, tab_history = st.tabs(["Run", "Batches", "History"])
 
 # ── Run tab ────────────────────────────────────────────────────────────────────
 
+def _normalize_csv(content: str) -> str:
+    return content.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+
+
 with tab_run:
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
     if uploaded_file:
         csv_bytes   = uploaded_file.read()
-        csv_content = csv_bytes.decode("utf-8", errors="replace")
+        csv_content = _normalize_csv(csv_bytes.decode("utf-8", errors="replace"))
         df_full     = pd.read_csv(io.StringIO(csv_content))
         file_hash   = hashlib.md5(csv_content.encode()).hexdigest()
 
-        st.session_state["csv_content"]  = csv_content
-        st.session_state["csv_filename"] = uploaded_file.name
+        st.session_state["csv_content"]       = csv_content
+        st.session_state["csv_filename"]      = uploaded_file.name
+        st.session_state["csv_loaded_from"]   = "upload"
 
         # ── duplicate / name-collision check ──────────────────────────────────
         try:
@@ -230,7 +286,6 @@ with tab_run:
                     f"Можно запустить снова — будет новый ран в истории."
                 )
             else:
-                # check same name, different content
                 same_name = find_source_files_by_name(uploaded_file.name)
                 if same_name:
                     st.warning(
@@ -247,14 +302,115 @@ with tab_run:
         with st.expander("Preview (first 5 rows)"):
             st.dataframe(df_full.head(5), use_container_width=True)
 
-    csv_content = st.session_state.get("csv_content")
+    csv_content  = st.session_state.get("csv_content")
     csv_filename = st.session_state.get("csv_filename", "upload.csv")
+    loaded_from  = st.session_state.get("csv_loaded_from", "upload")
+
+    # banner when content was loaded from Batches tab (no file uploader)
+    if csv_content and not uploaded_file:
+        st.info(f"Loaded from batch: **{csv_filename}**  — switch to Run and press a button below.")
+        df_preview = pd.read_csv(io.StringIO(csv_content))
+        st.write(f"**{len(df_preview)} leads**")
+        with st.expander("Preview (first 5 rows)"):
+            st.dataframe(df_preview.head(5), use_container_width=True)
 
     if csv_content:
         df_info = pd.read_csv(io.StringIO(csv_content))
         total   = len(df_info)
+        all_columns = list(df_info.columns)
 
         st.divider()
+
+        # ── Prompt editor ──────────────────────────────────────────────────────
+        if mode == "generate":
+            st.subheader("Prompt")
+
+            # load prompts from DB
+            try:
+                db_prompts = get_prompts(prompt_type="generation")
+            except Exception:
+                db_prompts = []
+
+            prompt_options = ["— custom (paste below) —"] + [p["name"] for p in db_prompts]
+            selected_prompt_option = st.selectbox(
+                "Choose prompt from collection", prompt_options,
+                key="prompt_selector",
+            )
+
+            # when selection changes — update text area state directly
+            prev_selection = st.session_state.get("_prev_prompt_selector")
+            if selected_prompt_option != prev_selection:
+                st.session_state["_prev_prompt_selector"] = selected_prompt_option
+                if selected_prompt_option == "— custom (paste below) —":
+                    st.session_state["prompt_text_area"] = st.session_state.get("custom_prompt_text", "")
+                else:
+                    matched = next((p for p in db_prompts if p["name"] == selected_prompt_option), None)
+                    st.session_state["prompt_text_area"] = matched["content"] if matched else ""
+
+            prompt_text_input = st.text_area(
+                "Prompt text", height=300, key="prompt_text_area",
+            )
+            # save custom text separately so it survives switching back
+            if selected_prompt_option == "— custom (paste below) —":
+                st.session_state["custom_prompt_text"] = prompt_text_input
+
+            # save to collection
+            with st.expander("Save this prompt to collection"):
+                save_name  = st.text_input("Name", key="save_prompt_name")
+                save_notes = st.text_area("Notes (optional)", height=80, key="save_prompt_notes")
+                if st.button("Save prompt", key="btn_save_prompt"):
+                    if save_name and prompt_text_input:
+                        try:
+                            save_prompt(save_name, "generation", prompt_text_input, save_notes or None)
+                            st.success(f"Saved: **{save_name}**")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Could not save: {e}")
+                    else:
+                        st.warning("Enter a name and prompt text.")
+
+            # delete from collection
+            if db_prompts:
+                with st.expander("Delete prompt from collection"):
+                    del_name = st.selectbox(
+                        "Select prompt to delete",
+                        [p["name"] for p in db_prompts],
+                        key="del_prompt_select",
+                    )
+                    if st.button("Delete", key="btn_del_prompt", type="secondary"):
+                        pid = next(p["id"] for p in db_prompts if p["name"] == del_name)
+                        try:
+                            delete_prompt(pid)
+                            st.success(f"Deleted: **{del_name}**")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Could not delete: {e}")
+
+            active_prompt_text = prompt_text_input or None
+
+            # ── Context columns selector ───────────────────────────────────────
+            st.subheader("Context columns")
+            st.caption("Which columns to pass to the model alongside the prompt.")
+
+            # auto-detect columns with long text as default
+            def _is_long_col(col):
+                sample = df_info[col].dropna().astype(str)
+                return sample.str.len().mean() > 80 if len(sample) else False
+
+            default_ctx = [c for c in all_columns if c in DEFAULT_CONTEXT_COLUMNS or _is_long_col(c)]
+            default_ctx = list(dict.fromkeys(default_ctx))  # deduplicate, preserve order
+
+            selected_context_cols = st.multiselect(
+                "Columns", all_columns, default=default_ctx, key="context_cols",
+            )
+        else:
+            active_prompt_text    = None
+            selected_context_cols = None
+
+        # ── Preview ────────────────────────────────────────────────────────────
+        st.divider()
+        with st.expander("Preview CSV (first 20 rows)"):
+            st.dataframe(df_info.head(20), use_container_width=True)
 
         test_size = st.number_input(
             "Test run size", min_value=1, max_value=total,
@@ -265,12 +421,16 @@ with tab_run:
         with col_test:
             if st.button(f"Test run — first {test_size} leads", use_container_width=True):
                 _run_pipeline(csv_content, csv_filename, int(test_size),
-                              f"Test run ({test_size} leads)")
+                              f"Test run ({test_size} leads)",
+                              prompt_text=active_prompt_text,
+                              context_columns=selected_context_cols or None)
         with col_full:
             if st.button(f"Full run — all {total} leads", type="primary",
                          use_container_width=True):
                 _run_pipeline(csv_content, csv_filename, None,
-                              f"Full run ({total} leads)")
+                              f"Full run ({total} leads)",
+                              prompt_text=active_prompt_text,
+                              context_columns=selected_context_cols or None)
 
         st.divider()
         _show_results()
@@ -311,10 +471,12 @@ with tab_batches:
                 if st.button("Load this batch into Run tab", type="primary"):
                     try:
                         fname, content = get_source_file_content(selected_batch_id)
-                        st.session_state["csv_content"]  = content
-                        st.session_state["csv_filename"] = fname
-                        st.session_state["results"]      = None
-                        st.success(f"Loaded **{fname}** — switch to Run tab.")
+                        content = _normalize_csv(content)
+                        st.session_state["csv_content"]     = content
+                        st.session_state["csv_filename"]    = fname
+                        st.session_state["csv_loaded_from"] = "batch"
+                        st.session_state["results"]         = None
+                        st.success(f"Loaded **{fname}** — перейди во вкладку Run.")
                     except Exception as e:
                         st.error(f"Could not load batch: {e}")
 
@@ -355,37 +517,57 @@ with tab_history:
         if not runs:
             st.info("No runs yet.")
         else:
-            runs_df = pd.DataFrame(runs)[
-                ["id", "source", "config_name", "total_inputs", "created_at"]
-            ]
-            st.dataframe(runs_df, use_container_width=True)
+            for r in runs:
+                dur  = f"{r['duration_sec']:.0f}s" if r["duration_sec"] else "—"
+                cost = f"${r['cost_usd']:.4f}" if r["cost_usd"] else "—"
+                label = (
+                    f"Run #{r['id']} — {r['source']} — "
+                    f"{r['total_inputs']} leads — "
+                    f"{r['config_name']} — "
+                    f"{dur} — {cost} — "
+                    f"{r['created_at'][:16]}"
+                )
+                with st.expander(label):
+                    # ── run summary row ────────────────────────────────────
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Leads", r["total_inputs"])
+                    c2.metric("Duration", dur)
+                    c3.metric("Cost", cost)
+                    c4.metric("Model", r.get("model") or "—")
 
-            selected_run_id = st.selectbox(
-                "View best results for run",
-                options=[r["id"] for r in runs],
-                format_func=lambda rid: next(
-                    f"#{rid} — {r['source']} ({r['total_inputs']} leads, {r['created_at'][:10]})"
-                    for r in runs if r["id"] == rid
-                ),
-            )
-
-            if selected_run_id:
-                run_results = get_run_results(selected_run_id)
-                if run_results:
-                    display_df = pd.DataFrame(run_results).drop(
-                        columns=["evaluation_json"], errors="ignore"
+                    st.caption(
+                        f"Config: `{r['config_name']}` | "
+                        f"Source: `{r.get('source_type', '—')}` | "
+                        f"Date: {r['created_at'][:16]}"
                     )
-                    st.dataframe(display_df, use_container_width=True)
 
-                    csv_out = display_df.to_csv(index=False).encode("utf-8")
-                    st.download_button(
-                        f"Download run #{selected_run_id} CSV",
-                        csv_out,
-                        file_name=f"run_{selected_run_id}_results.csv",
-                        mime="text/csv",
-                    )
-                else:
-                    st.info("No results for this run.")
+                    # ── lead results ───────────────────────────────────────
+                    run_results = get_run_results(r["id"])
+                    if not run_results:
+                        st.info("No results stored.")
+                    else:
+                        display_df = pd.DataFrame(run_results).drop(
+                            columns=["evaluation_json"], errors="ignore"
+                        )
+
+                        # aggregate score stats
+                        if "score" in display_df.columns:
+                            valid = display_df[display_df["score"] > 0]["score"]
+                            col_a, col_b, col_c = st.columns(3)
+                            col_a.metric("Avg score (best/lead)", f"{display_df['score'].mean():.1f}")
+                            col_b.metric("Avg score (non-zero)", f"{valid.mean():.1f}" if len(valid) else "—")
+                            col_c.metric("Leads with score > 0", f"{len(valid)} / {len(display_df)}")
+
+                        st.dataframe(display_df, use_container_width=True)
+
+                        csv_out = display_df.to_csv(index=False).encode("utf-8")
+                        st.download_button(
+                            f"Download run #{r['id']} CSV",
+                            csv_out,
+                            file_name=f"run_{r['id']}_results.csv",
+                            mime="text/csv",
+                            key=f"dl_run_{r['id']}",
+                        )
 
     except Exception as e:
         st.warning(f"Could not connect to DB: {e}")

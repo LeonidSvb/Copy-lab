@@ -16,6 +16,9 @@ client = OpenAI(
 MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-oss-120b")
 
 
+INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+
 def evaluate(full_email: str) -> tuple[dict, dict]:
     with open(ROOT / "prompts/evaluation.txt", "r", encoding="utf-8") as f:
         evaluation_prompt = f.read()

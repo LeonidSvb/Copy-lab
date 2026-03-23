@@ -15,28 +15,59 @@ MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-oss-120b")
 DEFAULT_VARIANT_COUNT = 3
 DEFAULT_TEMPERATURE = 0.6
 
+INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+# Match at START of response only — avoids false positives like "I can't help but notice..."
+_REFUSAL_STARTS = (
+    "i'm sorry,",
+    "i'm sorry but",
+    "i cannot fulfill",
+    "i can't fulfill",
+    "i am unable to fulfill",
+    "i'm unable to fulfill",
+    "i cannot complete",
+    "i can't complete",
+)
+
+# Unambiguous model error patterns — match anywhere
+_REFUSAL_CONTAINS = (
+    "isn't one of the allowed",
+    "not in the allowed list",
+    "don't match the required format",
+    "doesn't match the required format",
+    "variables you provided don't match",
+    "variables you provided doesn't match",
+)
+
+
+def _is_refusal(text: str) -> bool:
+    low = text.lower().strip()
+    if any(low.startswith(m) for m in _REFUSAL_STARTS):
+        return True
+    if any(m in low for m in _REFUSAL_CONTAINS):
+        return True
+    return False
+
 
 def generate_variants(
-    extraction: dict,
-    batch_prompt_file: str = None,
+    prompt_text: str,
+    context_vars: dict,
     variant_count: int = DEFAULT_VARIANT_COUNT,
     temperature: float = DEFAULT_TEMPERATURE,
 ) -> tuple[list[str], dict]:
-    prompt_path = Path(batch_prompt_file) if batch_prompt_file else (
-        ROOT / os.getenv("BATCH_PROMPT", "prompts/batch01_recruiting_q2_connector.txt")
-    )
-    with open(prompt_path, "r", encoding="utf-8") as f:
-        batch_prompt = f.read()
+    """
+    Context-driven generation — no rigid template.
 
-    dream_icp = extraction.get("dreamICP", "")
-    job_titles = dream_icp.split(" at ")[0].split(" in ")[0].strip()
-
-    prompt = (
-        batch_prompt
-        .replace("{job_titles}", job_titles)
-        .replace("{company_type}", extraction.get("company_type", ""))
-        .replace("{recruiting_subniche}", extraction.get("subniche", ""))
-    )
+    prompt_text : full prompt (instructions + style + examples)
+    context_vars: {column_name: value} — passed as a context block appended to prompt
+    """
+    context_lines = [
+        f"{k}: {v}"
+        for k, v in context_vars.items()
+        if v and str(v).strip() and str(v).strip().lower() not in ("nan", "none", "")
+    ]
+    context_block = "\n".join(context_lines)
+    full_prompt = f"{prompt_text.strip()}\n\n---\n{context_block}\n---"
 
     variants = []
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
@@ -44,13 +75,20 @@ def generate_variants(
     for _ in range(variant_count):
         response = client.chat.completions.create(
             model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": full_prompt}],
             temperature=temperature,
-            max_tokens=300,
+            max_tokens=400,
         )
         usage["prompt_tokens"]     += response.usage.prompt_tokens
         usage["completion_tokens"] += response.usage.completion_tokens
-        variants.append(response.choices[0].message.content.strip())
+        text = response.choices[0].message.content.strip()
+        if not text:
+            print(f"  [generate] empty response from model")
+            text = INSUFFICIENT_DATA
+        elif _is_refusal(text):
+            print(f"  [generate] refusal detected: {text[:120]!r}")
+            text = INSUFFICIENT_DATA
+        variants.append(text)
 
     return variants, usage
 

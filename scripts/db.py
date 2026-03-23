@@ -58,12 +58,21 @@ def init_schema():
 
 # ── source files ─────────────────────────────────────────────────────────────
 
+def _count_csv_rows(content: str) -> int:
+    import csv, io
+    try:
+        return sum(1 for _ in csv.reader(io.StringIO(content))) - 1  # minus header
+    except Exception:
+        return max(content.count("\n") - 1, 0)
+
+
 def save_source_file(filepath: str) -> int:
     with open(filepath, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
 
+    content   = _normalize_csv(content)
     file_hash = hashlib.md5(content.encode()).hexdigest()
-    row_count = max(content.count("\n") - 1, 0)  # minus header
+    row_count = _count_csv_rows(content)
     file_size = len(content.encode())
     filename = Path(filepath).name
 
@@ -302,9 +311,15 @@ def set_ranks(gen_ids_by_rank: list[int]):
     conn.close()
 
 
+def _normalize_csv(content: str) -> str:
+    """Strip BOM and normalize line endings so same-data files hash identically."""
+    return content.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+
+
 def save_source_file_from_content(filename: str, content: str) -> int:
+    content   = _normalize_csv(content)
     file_hash = hashlib.md5(content.encode()).hexdigest()
-    row_count = max(content.count("\n") - 1, 0)
+    row_count = _count_csv_rows(content)
     file_size = len(content.encode())
 
     conn = get_conn()
@@ -429,3 +444,56 @@ def get_run_results(run_id: int) -> list:
         }
         for r in rows
     ]
+
+
+# ── prompts ───────────────────────────────────────────────────────────────────
+
+def get_prompts(prompt_type: str = None) -> list:
+    conn = get_conn()
+    cur = conn.cursor()
+    if prompt_type:
+        cur.execute("""
+            SELECT id, name, type, content, notes, created_at
+            FROM prompts WHERE deleted_at IS NULL AND type = %s
+            ORDER BY created_at DESC
+        """, (prompt_type,))
+    else:
+        cur.execute("""
+            SELECT id, name, type, content, notes, created_at
+            FROM prompts WHERE deleted_at IS NULL
+            ORDER BY created_at DESC
+        """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [
+        {"id": r[0], "name": r[1], "type": r[2],
+         "content": r[3], "notes": r[4], "created_at": str(r[5])}
+        for r in rows
+    ]
+
+
+def save_prompt(name: str, prompt_type: str, content: str, notes: str = None) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO prompts (name, type, content, notes)
+        VALUES (%s, %s, %s, %s) RETURNING id
+    """, (name, prompt_type, content, notes))
+    pid = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    return pid
+
+
+def delete_prompt(prompt_id: int) -> None:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE prompts SET deleted_at = NOW() WHERE id = %s",
+        (prompt_id,)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()

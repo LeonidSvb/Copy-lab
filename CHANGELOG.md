@@ -6,8 +6,92 @@
 
 ## [Unreleased]
 
-### Planned
-- **Retry logic** — exponential backoff on Groq 429 errors
+### Planned — Unified Enrichment Architecture (v0.15.0)
+
+**Concept:** extract / generate / evaluate — это один и тот же паттерн: input columns + prompt → output.
+Разница только в формате вывода: `text` (одна колонка) или `json` (несколько колонок по схеме).
+
+**Migration 007** — расширение таблицы `prompts`:
+- `output_type TEXT DEFAULT 'text'` — `'text'` | `'json'`
+- `output_column TEXT` — имя выходной колонки (для text типа, напр. `email_body`, `clean_name`)
+- `json_schema JSONB` — для json типа: `[{"name": "dreamICP", "type": "string", "description": "..."}]`; имена полей = имена колонок в результате
+
+**scripts/enrichment.py** (новый файл, заменяет extract.py + generate.py + evaluate.py):
+- `run_enrichment(prompt_text, context_vars, output_type, json_schema, temperature, max_tokens)` — единая функция
+- text режим: вызов модели → строка → возврат; refusal detection остаётся
+- json режим: `response_format={"type": "json_object"}` в API + схема дописывается в конец промпта как инструкция; возврат dict
+- `run_enrichment_variants(prompt_text, context_vars, n, temperature)` — для generation (3 варианта → pick best)
+- `INSUFFICIENT_DATA` константа
+
+**scripts/main.py** — рефакторинг `process_generate()`:
+- extract() → `run_enrichment(..., output_type="json")`
+- generate_variants() → `run_enrichment_variants(...)`
+- evaluate() → `run_enrichment(..., output_type="json")`
+- extract.py / generate.py / evaluate.py становятся deprecated (пока не удаляем)
+
+**app.py — расширение Prompt Editor:**
+- При сохранении промпта: поле `output_type` (radio: Text / JSON)
+- Если Text: поле `Output column name` (напр. `email_body`)
+- Если JSON: таблица Schema Fields (Field name | Type | Description); строки = будущие колонки
+- При выборе промпта из коллекции: показывать output_type + output_column / json_schema
+
+**app.py — видимость колонок в результатах:**
+- multiselect "Visible columns" над таблицей результатов
+- По умолчанию: `first_name`, `email`, `company_name`, `best_score`, `best_full_email`
+- Скрытые колонки включены в CSV download
+
+### Planned — Retry logic
+- Exponential backoff on Groq 429 errors
+
+---
+
+## [0.14.0] - 2026-03-24 - Context-driven generation + prompt collection + run stats UI
+
+### Added
+- `migrations/006_prompts_table.sql` — `prompts` table with soft delete (`deleted_at`), type, notes
+- `db.py` — `get_prompts()`, `save_prompt()`, `delete_prompt()` (soft)
+- `main.py` — `DEFAULT_CONTEXT_COLUMNS` — default columns passed as context to generation
+- `app.py` — Run tab: prompt editor (select from DB collection OR paste custom), save/delete prompt UI
+- `app.py` — Run tab: context column multiselect (auto-detects long-text columns as default)
+- `app.py` — Run tab: CSV preview expanded to 20 rows
+- `app.py` — After run: stats block (total, OK, failed, duration, avg score, score>5 count) + "Regenerate N failed leads" button
+
+### Changed
+- `generate.py` — completely rewritten: no more rigid fill-in-the-blank template; accepts `prompt_text` + `context_vars` dict; context appended as `key: value` block after prompt separator
+- `main.py` — `process_generate()` builds `context_vars` from selected columns + extracted variables; `run()` accepts `prompt_text` and `context_columns`
+- `prompts/batch01_recruiting_q2_connector.txt` — rewritten as instruction prompt (no template variables); model gets context block with extracted data and writes freely
+
+---
+
+## [0.13.0] - 2026-03-24 - Batch load fix + dedup normalization
+
+### Fixed
+- `db.py` — added `_normalize_csv()`: strips BOM (`\ufeff`) and normalizes line endings (`\r\n` → `\n`) before hashing; same-data files exported from Excel with different line endings now correctly deduplicate
+- `app.py` — same normalization applied on file upload before hashing and saving
+- `app.py` — Run tab now shows banner "Loaded from batch: filename" + lead count + preview when content was loaded from Batches tab (previously invisible, looked like nothing happened)
+- `app.py` — Batches tab "Load batch" now stores `csv_loaded_from=batch` flag so Run tab distinguishes upload vs batch-load
+
+---
+
+## [0.12.0] - 2026-03-24 - Refusal guard + history expanders + prompt fix
+
+### Fixed
+- `prompts/batch01_recruiting_q2_connector.txt` — removed strict job_titles whitelist (CFOs, plant managers only) that caused model refusals for CTOs and other valid titles; replaced with open examples
+- `generate.py` — added refusal detection: if model returns "I'm sorry / I cannot / can't fulfill / not in allowed list" etc., variant is saved as `INSUFFICIENT_DATA` instead of garbage text
+- `main.py` — `INSUFFICIENT_DATA` variants skip evaluation entirely (score=0, no tokens wasted)
+
+### Changed
+- `app.py` — History tab redesigned: flat list of runs replaced by `st.expander` per run; each expander shows 4 metrics (leads, duration, cost, model), aggregate score stats (avg, non-zero avg, leads with score>0), full results table, download button
+
+---
+
+## [0.11.0] - 2026-03-24 - Log display fix + results always shown + cost fix + row count fix
+
+### Fixed
+- `app.py` — results now saved to `session_state` even when `shared["error"]` is set (split `if/elif` into separate `if` blocks — partial successes were silently dropped)
+- `app.py` — log display replaced `st.code` (copy button broken) with `st.text_area` + `st.download_button("Download log as .txt")` for reliable copy/export
+- `configs/model_pricing.json` — file was copied to app root on VPS instead of `configs/`, causing "cost unknown" in all run summaries; fixed path
+- `db.py` — `row_count` was calculated via `content.count("\n")` which overcounted multi-line CSV fields (400 leads → 3526); fixed to use `csv.reader` for correct row counting. Existing DB records patched.
 
 ---
 

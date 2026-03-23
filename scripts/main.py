@@ -19,11 +19,16 @@ from db import (init_schema, get_or_create_config, create_run, update_run_total,
                 save_source_file, save_source_file_from_content,
                 save_input, save_extraction, save_generation, set_ranks)
 from extract import extract
-from generate import generate_variants, assemble_email
+from generate import generate_variants, assemble_email, INSUFFICIENT_DATA as _INSUF
 from evaluate import evaluate, select_best
 
 ANGLES = ["observation", "pain", "signal", "variant_4", "variant_5",
           "variant_6", "variant_7", "variant_8", "variant_9", "variant_10"]
+
+# columns from original CSV row passed to generation by default
+DEFAULT_CONTEXT_COLUMNS = [
+    "company_name", "short_description", "website_summary", "title", "linkedin_url",
+]
 
 COLUMN_MAP = {
     "First Name": "first_name",
@@ -133,7 +138,10 @@ def process_baseline(row: dict, run_id: int, config_id: int,
 
 
 def process_generate(row: dict, run_id: int, config_id: int, niche: str,
-                     log_fn=print, batch_prompt_file: str = None,
+                     log_fn=print,
+                     prompt_text: str = None,
+                     batch_prompt_file: str = None,
+                     context_columns: list = None,
                      variant_count: int = 3,
                      temperature_generation: float = 0.6) -> tuple[dict, dict]:
     lead_start = time.monotonic()
@@ -153,10 +161,29 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str,
     input_id = save_input(run_id, row)
     extraction_id = save_extraction(input_id, run_id, extraction)
 
+    # build context_vars: selected original columns + extracted variables
+    cols = context_columns if context_columns is not None else DEFAULT_CONTEXT_COLUMNS
+    context_vars = {col: row.get(col) for col in cols if row.get(col)}
+    # extracted variables always included (skip reasoning — internal only)
+    context_vars.update({
+        k: v for k, v in extraction.items()
+        if k != "reasoning" and v
+    })
+
+    # resolve prompt text
+    if prompt_text is None:
+        if batch_prompt_file:
+            with open(batch_prompt_file, "r", encoding="utf-8") as f:
+                prompt_text = f.read()
+        else:
+            default = ROOT / "prompts/batch01_recruiting_q2_connector.txt"
+            with open(default, "r", encoding="utf-8") as f:
+                prompt_text = f.read()
+
     log_fn(f"  generating {variant_count} variants...")
     email_bodies, gen_usage = generate_variants(
-        extraction,
-        batch_prompt_file=batch_prompt_file,
+        prompt_text=prompt_text,
+        context_vars=context_vars,
         variant_count=variant_count,
         temperature=temperature_generation,
     )
@@ -168,10 +195,15 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str,
         icebreaker_line = body.split("\n")[0].strip()
         angle = ANGLES[i] if i < len(ANGLES) else f"variant_{i+1}"
 
-        log_fn(f"  evaluating variant {i+1} ({angle})...")
-        eval_result, eval_usage = evaluate(full_email)
-        _add_usage(usage, eval_usage)
-        score = eval_result.get("total_score", 0)
+        if body == _INSUF:
+            log_fn(f"  variant {i+1} ({angle}): INSUFFICIENT_DATA — skipping evaluation")
+            eval_result, eval_usage = {"total_score": 0, "note": "insufficient_data"}, {}
+            score = 0
+        else:
+            log_fn(f"  evaluating variant {i+1} ({angle})...")
+            eval_result, eval_usage = evaluate(full_email)
+            _add_usage(usage, eval_usage)
+            score = eval_result.get("total_score", 0)
 
         gen_id = save_generation(
             input_id=input_id, run_id=run_id,
@@ -218,12 +250,14 @@ def run(
     df: pd.DataFrame = None,
     csv_filename: str = None,
     csv_content: str = None,
+    prompt_text: str = None,
     batch_prompt_file: str = None,
+    context_columns: list = None,
     variant_count: int = 3,
     temperature_generation: float = 0.6,
     source_type: str = "cli",
     max_workers: int = 1,
-    progress_fn=None,   # called as progress_fn(done, total) after each lead
+    progress_fn=None,
 ) -> list:
     init_schema()
 
@@ -277,7 +311,9 @@ def run(
             else:
                 result, usage = process_generate(
                     row, run_id, config_id, niche, safe_log,
+                    prompt_text=prompt_text,
                     batch_prompt_file=batch_prompt_file,
+                    context_columns=context_columns,
                     variant_count=variant_count,
                     temperature_generation=temperature_generation,
                 )

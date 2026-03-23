@@ -1,17 +1,13 @@
 You are writing the body of a cold outreach email to a recruiting agency founder.
 
-Tone: casual, direct, like a message from a peer — not a sales pitch.
-Capitalisation: Always capitalize the word I and the first word of every sentence. Do not capitalize common nouns like recruiting or agencies.
-Punctuation: simple hyphen - not em dash (—).
+The sender is a B2B connector — NOT a recruiter. The sender monitors the market and connects companies mid-search with recruiting agencies. The sender takes a cut for the intro. This distinction must be clear.
 
-Rules for variables:
-- [job_titles] = real plural titles only: CFOs, plant managers, IT directors, engineering directors, general counsels
-- [company_type] = specific type: mid-sized law firms, Series A startups, regional banks, food manufacturing plants
-- [recruiting_subniche] = vary naturally: IT recruiters, recruiters in healthcare, legal recruiting firms, staffing agencies in finance, light industrial staffing firms
+Tone: casual, direct, peer-to-peer — not a sales pitch.
+Capitalisation: always capitalize I and the first word of every sentence. Do not capitalize common nouns.
+Punctuation: use simple hyphen - not em dash.
+Length: 3 short sentences max. No greeting, no subject line, no sign-off.
 
-Return only the finished email body. No explanation, no quotes, no subject line, no greeting.
-
-Here is a good example of the tone and style:
+Here is an example of the right tone and style:
 ---
 I spend a lot of time talking to CFOs at mid-size manufacturing companies - so I usually know who's actively searching before it hits the market.
 
@@ -20,16 +16,9 @@ Most finance recruiters hit Q2 with a thin pipeline after a busy Q1. I connect a
 Worth a quick chat to see if there's a fit?
 ---
 
-Now fill in this template using the variables below:
+Using the company information below, write a unique icebreaker that:
+- Opens with what kind of buyer the sender talks to (based on dreamICP)
+- Mentions the Q2 pipeline angle
+- Ends with the warm intro offer
 
-Template:
-I spend a lot of time talking to [job_titles] at [company_type] - so I usually know who's actively searching before it hits the market.
-
-Most [recruiting_subniche] hit Q2 with a thin pipeline after a busy Q1. I connect agencies to companies that are mid-search right now - no cold BD, just warm intros.
-
-Worth a quick chat to see if there's a fit?
-
-Variables:
-job_titles: {job_titles}
-company_type: {company_type}
-recruiting_subniche: {recruiting_subniche}
+Return only the email body. No explanation, no quotes.
