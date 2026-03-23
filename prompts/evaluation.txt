@@ -1,20 +1,6 @@
 You are evaluating a cold email for quality. Score it strictly — be a tough critic.
 
-FULL EMAIL:
-{full_email}
-
-Score each metric and return ONLY valid JSON:
-
-{
-  "specificity": <0-5>,
-  "genericness_penalty": <0-5>,
-  "clarity": <0-5>,
-  "role_confusion": <0 or 1>,
-  "length_violation": <0 or 1>,
-  "total_score": <calculated>,
-  "issues": ["issue 1", "issue 2"],
-  "verdict": "one sentence on why this wins or loses"
-}
+Score each metric listed below. Return ONLY valid JSON, nothing else.
 
 SCORING GUIDE:
 
@@ -43,5 +29,4 @@ length_violation (0 or 1):
 total_score = specificity + clarity - genericness_penalty - (role_confusion * 3) - (length_violation * 2)
 
 issues = list of specific problems found (empty array if none)
-
-Output ONLY the JSON object, nothing else.
+verdict = one sentence on why this email wins or loses

@@ -3,33 +3,12 @@ You are extracting structured variables from a company description for use in a 
 The sender is a B2B connector who monitors market signals and connects companies to their ideal clients.
 For the recruiting niche: the sender connects recruiting/staffing agencies to companies that need to hire right now.
 
-NICHE CONTEXT:
-{niche_context}
-
-COMPANY INFO (the recruiting/staffing agency we are emailing):
-{company_info}
-
----
-
 CRITICAL DISTINCTION:
 Recruiting agencies have two groups:
 - CANDIDATES = people they place (engineers, lawyers, etc.) — this is their PRODUCT, ignore for extraction
 - CLIENTS/BUYERS = companies that PAY them to find candidates — this is what we want
 
 Extract dreamICP = the BUYERS (companies + decision makers who hire FROM this agency).
-
----
-
-Return ONLY valid JSON, no explanation:
-
-{
-  "dreamICP": "plural group of BUYERS written casually — the decision makers at companies who pay this agency. Examples: 'CTOs at Series A SaaS startups', 'engineering directors at mid-market tech firms', 'plant managers at food manufacturers', 'general counsels at mid-market law firms'",
-  "company_type": "specific type of companies that are their clients — NOT generic. Examples: 'capital region tech firms', 'mid-sized law firms', 'food manufacturing plants', 'regional banks'",
-  "subniche": "2-4 word label for their recruiting specialty. Examples: 'IT recruiting', 'legal staffing', 'light industrial staffing', 'finance and audit recruiting'",
-  "painTheySolve": "how the BUYERS (their clients) naturally complain about hiring — 8-15 words max, lowercase, no punctuation. Examples: 'keep burning weeks on senior dev hires that fall through', 'keep losing good candidates halfway through the process', 'only see the same 10 resumes every search'",
-  "clean_company_name": "company name without LLC/Inc/Corp/Ltd — use the short version people actually say",
-  "reasoning": "one sentence: if company serves multiple niches, explain which buyer type you picked and why"
-}
 
 RULES:
 - dreamICP must be plural, casual titles — NOT 'decision-makers', 'stakeholders', 'leaders', 'professionals'

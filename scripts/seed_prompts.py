@@ -1,4 +1,5 @@
 """One-time script to seed the prompts table with the initial prompt collection."""
+import json
 import psycopg2
 import os
 import sys
@@ -15,6 +16,7 @@ conn = psycopg2.connect(
 )
 cur = conn.cursor()
 
+# (name, type, content, notes, output_type, output_column, json_schema)
 PROMPTS = [
 
 # ── GENERATION ─────────────────────────────────────────────────────────────
@@ -49,7 +51,8 @@ Using the company information below, write a unique icebreaker that:
 
 Return only the email body. No explanation, no quotes.\
 """,
-"Q2 pipeline angle. Main batch01 prompt. Context-driven, no template variables."),
+"Q2 pipeline angle. Main batch01 prompt. Context-driven, no template variables.",
+"text", "email_body", None),
 
 
 ("ssm_noticed_company", "generation", """\
@@ -75,7 +78,8 @@ never "decision-makers" or "leaders"
 
 Use the company data provided below. Return only the two lines. No greeting, no explanation.\
 """,
-"SSM SOP Prompt #1. Company-based connector insight. 'Noticed [company] helps...'"),
+"SSM SOP Prompt #1. Company-based connector insight. 'Noticed [company] helps...'",
+"text", "email_body", None),
 
 
 ("ssm_market_conversations", "generation", """\
@@ -101,7 +105,8 @@ Rules:
 
 Use the company data provided below. Return only the 3 lines. No greeting, no explanation.\
 """,
-"SSM SOP Prompt #2. Market conversations angle. 'Figured I'd reach out — I talk to a lot of...'"),
+"SSM SOP Prompt #2. Market conversations angle. 'Figured I'd reach out — I talk to a lot of...'",
+"text", "email_body", None),
 
 
 ("ssm_around_daily", "generation", """\
@@ -123,7 +128,8 @@ Rules:
 
 Use the company data provided below. Return only the single line. No greeting, no explanation.\
 """,
-"SSM SOP Prompt #3. 'I'm around them daily' angle. One-liner opener."),
+"SSM SOP Prompt #3. 'I'm around them daily' angle. One-liner opener.",
+"text", "email_body", None),
 
 
 ("ssm_deal_flow", "generation", """\
@@ -147,7 +153,8 @@ Rules:
 
 Use the company data provided below. Return only the 3 lines exactly. No greeting, no explanation.\
 """,
-"SSM SOP Prompt #4. Deal-flow angle. 'Saw some movement on my side...'"),
+"SSM SOP Prompt #4. Deal-flow angle. 'Saw some movement on my side...'",
+"text", "email_body", None),
 
 
 # ── EXTRACTION ─────────────────────────────────────────────────────────────
@@ -165,7 +172,9 @@ Rules:
 
 Return only the cleaned name. No explanation.\
 """,
-"Extraction prompt: normalize company name to 1-2 word brand. Input: company_name column."),
+"Extraction prompt: normalize company name to 1-2 word brand. Input: company_name column.",
+"text", "clean_company_name", None),
+
 
 ("ssm_pain_point", "extraction", """\
 Your job: Identify one specific pain point this company likely faces based on their business description.
@@ -191,7 +200,9 @@ Rules you MUST follow:
 
 Give me: Just the pain point phrase. Nothing else. No explanation.\
 """,
-"SSM extraction: one specific pain point, 8-12 words lowercase. Better than painTheySolve for atomic use."),
+"SSM extraction: one specific pain point, 8-12 words lowercase.",
+"text", "pain_point", None),
+
 
 ("ssm_relevant_observation", "extraction", """\
 Your job: Identify one specific, recent observation about this company that shows you actually looked at their business.
@@ -214,12 +225,13 @@ Rules you MUST follow:
 
 Give me: Just the observation phrase. Nothing else. No explanation.\
 """,
-"SSM extraction: specific recent observation about the company. Returns 'insufficient data' if no signal found."),
+"SSM extraction: specific recent observation about the company.",
+"text", "relevant_observation", None),
 
 ]
 
 inserted = 0
-for name, ptype, content, notes in PROMPTS:
+for name, ptype, content, notes, output_type, output_column, json_schema in PROMPTS:
     cur.execute(
         "SELECT id FROM prompts WHERE name = %s AND deleted_at IS NULL",
         (name,)
@@ -228,10 +240,12 @@ for name, ptype, content, notes in PROMPTS:
         print(f"  skip (exists): {name}")
         continue
     cur.execute(
-        "INSERT INTO prompts (name, type, content, notes) VALUES (%s, %s, %s, %s)",
-        (name, ptype, content, notes),
+        """INSERT INTO prompts (name, type, content, notes, output_type, output_column, json_schema)
+           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+        (name, ptype, content, notes, output_type, output_column,
+         json.dumps(json_schema) if json_schema else None),
     )
-    print(f"  inserted: {name} ({ptype})")
+    print(f"  inserted: {name} ({ptype}, output_type={output_type})")
     inserted += 1
 
 conn.commit()

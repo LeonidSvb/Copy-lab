@@ -453,13 +453,15 @@ def get_prompts(prompt_type: str = None) -> list:
     cur = conn.cursor()
     if prompt_type:
         cur.execute("""
-            SELECT id, name, type, content, notes, created_at
+            SELECT id, name, type, content, notes, created_at,
+                   output_type, output_column, json_schema
             FROM prompts WHERE deleted_at IS NULL AND type = %s
             ORDER BY created_at DESC
         """, (prompt_type,))
     else:
         cur.execute("""
-            SELECT id, name, type, content, notes, created_at
+            SELECT id, name, type, content, notes, created_at,
+                   output_type, output_column, json_schema
             FROM prompts WHERE deleted_at IS NULL
             ORDER BY created_at DESC
         """)
@@ -468,18 +470,23 @@ def get_prompts(prompt_type: str = None) -> list:
     conn.close()
     return [
         {"id": r[0], "name": r[1], "type": r[2],
-         "content": r[3], "notes": r[4], "created_at": str(r[5])}
+         "content": r[3], "notes": r[4], "created_at": str(r[5]),
+         "output_type": r[6] or "text", "output_column": r[7],
+         "json_schema": r[8]}
         for r in rows
     ]
 
 
-def save_prompt(name: str, prompt_type: str, content: str, notes: str = None) -> int:
+def save_prompt(name: str, prompt_type: str, content: str, notes: str = None,
+                output_type: str = "text", output_column: str = None,
+                json_schema: list = None) -> int:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO prompts (name, type, content, notes)
-        VALUES (%s, %s, %s, %s) RETURNING id
-    """, (name, prompt_type, content, notes))
+        INSERT INTO prompts (name, type, content, notes, output_type, output_column, json_schema)
+        VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
+    """, (name, prompt_type, content, notes, output_type, output_column,
+          json.dumps(json_schema) if json_schema else None))
     pid = cur.fetchone()[0]
     conn.commit()
     cur.close()

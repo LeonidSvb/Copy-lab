@@ -210,8 +210,18 @@ def _show_results():
         sc[1].metric("Avg score (non-zero)", f"{valid_scores.mean():.1f}" if len(valid_scores) else "—")
         sc[2].metric("Leads score > 5", f"{(results_df['best_score'] > 5).sum()} / {total}")
 
+    # ── column visibility ─────────────────────────────────────────────────────
+    all_cols = list(results_df.columns)
+    default_visible = [c for c in ["first_name", "email", "company_name",
+                                   "best_angle", "best_score", "best_full_email"]
+                       if c in all_cols]
+    visible_cols = st.multiselect(
+        "Visible columns", all_cols, default=default_visible, key="visible_cols",
+    )
+    display_df = results_df[visible_cols] if visible_cols else results_df
+
     # ── table + actions ───────────────────────────────────────────────────────
-    st.dataframe(results_df, use_container_width=True)
+    st.dataframe(display_df, use_container_width=True)
 
     col_dl, col_regen = st.columns([1, 1])
     with col_dl:
@@ -354,15 +364,78 @@ with tab_run:
             if selected_prompt_option == "— custom (paste below) —":
                 st.session_state["custom_prompt_text"] = prompt_text_input
 
+            # show output_type info for selected prompt
+            if selected_prompt_option != "— custom (paste below) —":
+                matched = next((p for p in db_prompts if p["name"] == selected_prompt_option), None)
+                if matched:
+                    otype = matched.get("output_type", "text")
+                    ocol  = matched.get("output_column")
+                    schema = matched.get("json_schema")
+                    if otype == "json" and schema:
+                        field_names = ", ".join(f["name"] for f in schema)
+                        st.caption(f"Output type: **json** — columns: `{field_names}`")
+                    else:
+                        st.caption(f"Output type: **text** — column: `{ocol or '—'}`")
+
             # save to collection
             with st.expander("Save this prompt to collection"):
                 save_name  = st.text_input("Name", key="save_prompt_name")
-                save_notes = st.text_area("Notes (optional)", height=80, key="save_prompt_notes")
+                save_notes = st.text_area("Notes (optional)", height=60, key="save_prompt_notes")
+
+                save_output_type = st.radio(
+                    "Output type", ["text", "json"],
+                    horizontal=True, key="save_output_type",
+                )
+
+                if save_output_type == "text":
+                    save_output_column = st.text_input(
+                        "Output column name",
+                        placeholder="e.g. email_body, clean_name, pain_point",
+                        key="save_output_column",
+                    )
+                    save_json_schema = None
+                else:
+                    st.caption("Define output fields — each field name becomes a column.")
+                    if "schema_fields" not in st.session_state:
+                        st.session_state["schema_fields"] = [{"name": "", "type": "string", "description": ""}]
+
+                    fields = st.session_state["schema_fields"]
+                    updated_fields = []
+                    for fi, field in enumerate(fields):
+                        c1, c2, c3, c4 = st.columns([2, 1, 3, 0.5])
+                        fname = c1.text_input("Field name", value=field["name"],
+                                              key=f"sf_name_{fi}", label_visibility="collapsed",
+                                              placeholder="field_name")
+                        ftype = c2.selectbox("Type", ["string", "number", "array"],
+                                             index=["string","number","array"].index(field.get("type","string")),
+                                             key=f"sf_type_{fi}", label_visibility="collapsed")
+                        fdesc = c3.text_input("Description", value=field.get("description",""),
+                                              key=f"sf_desc_{fi}", label_visibility="collapsed",
+                                              placeholder="description")
+                        if c4.button("x", key=f"sf_del_{fi}") and len(fields) > 1:
+                            continue
+                        updated_fields.append({"name": fname, "type": ftype, "description": fdesc})
+                    st.session_state["schema_fields"] = updated_fields
+
+                    if st.button("+ Add field", key="btn_add_field"):
+                        st.session_state["schema_fields"].append({"name": "", "type": "string", "description": ""})
+                        st.rerun()
+
+                    save_output_column = None
+                    save_json_schema = [f for f in updated_fields if f["name"].strip()]
+
                 if st.button("Save prompt", key="btn_save_prompt"):
                     if save_name and prompt_text_input:
                         try:
-                            save_prompt(save_name, "generation", prompt_text_input, save_notes or None)
+                            save_prompt(
+                                save_name, "generation", prompt_text_input,
+                                save_notes or None,
+                                output_type=save_output_type,
+                                output_column=save_output_column or None,
+                                json_schema=save_json_schema or None,
+                            )
                             st.success(f"Saved: **{save_name}**")
+                            st.session_state.pop("schema_fields", None)
                             st.rerun()
                         except Exception as e:
                             st.error(f"Could not save: {e}")

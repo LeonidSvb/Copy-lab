@@ -4,6 +4,33 @@
 
 ---
 
+## [0.15.0] - 2026-03-24 - Unified enrichment architecture
+
+### Added
+- `migrations/007_enrichment_fields.sql` — adds `output_type`, `output_column`, `json_schema` to `prompts` table
+- `scripts/enrichment.py` — unified enrichment runner replacing extract.py / generate.py / evaluate.py internals
+  - `run_enrichment(prompt_text, context_vars, output_type, json_schema, temperature, max_tokens)` → `(str|dict, usage)`
+  - text mode: refusal detection, returns string; json mode: `response_format=json_object` + schema instruction, returns dict
+  - `_build_prompt()` — appends context block; `_build_schema_instruction()` — appends JSON format instruction
+- `app.py` — prompt Save section: `output_type` radio (Text/JSON), `output_column` input, dynamic schema field builder
+- `app.py` — prompt selector: shows output_type + column/schema as caption under text area
+- `app.py` — column visibility multiselect above results table (default: key columns only; CSV always full)
+
+### Changed
+- `scripts/main.py` — `process_generate()` and `process_baseline()` now use `run_enrichment()` for all LLM calls
+- `scripts/main.py` — `_EXTRACTION_SCHEMA` and `_EVALUATION_SCHEMA` defined inline as json_schema lists
+- `scripts/main.py` — removed imports of extract/generate/evaluate modules; single `enrichment` import
+- `scripts/db.py` — `get_prompts()` returns `output_type`, `output_column`, `json_schema`
+- `scripts/db.py` — `save_prompt()` accepts `output_type`, `output_column`, `json_schema`
+- `scripts/seed_prompts.py` — all 8 prompts updated with `output_type` and `output_column` fields
+- `prompts/extraction.txt` — removed `{niche_context}` / `{company_info}` placeholders; context via block
+- `prompts/evaluation.txt` — removed `{full_email}` placeholder; scoring guide cleaned up
+
+### Deprecated
+- `scripts/extract.py`, `scripts/generate.py`, `scripts/evaluate.py` — internals replaced by `enrichment.py`; files kept for reference
+
+---
+
 ## [Unreleased]
 
 ### Planned — Unified Enrichment Architecture (v0.15.0)

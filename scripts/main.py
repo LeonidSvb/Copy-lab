@@ -18,9 +18,7 @@ from db import (init_schema, get_or_create_config, create_run, update_run_total,
                 update_run_stats, update_input_stats,
                 save_source_file, save_source_file_from_content,
                 save_input, save_extraction, save_generation, set_ranks)
-from extract import extract
-from generate import generate_variants, assemble_email, INSUFFICIENT_DATA as _INSUF
-from evaluate import evaluate, select_best
+from enrichment import run_enrichment, INSUFFICIENT_DATA as _INSUF
 
 ANGLES = ["observation", "pain", "signal", "variant_4", "variant_5",
           "variant_6", "variant_7", "variant_8", "variant_9", "variant_10"]
@@ -50,6 +48,28 @@ BASELINE_BODY_SUFFIX = (
     "I connect agencies to companies that are mid-search right now - no cold BD, just warm intros.\n\n"
     "Worth a quick chat to see if there's a fit?"
 )
+
+# JSON schema for extraction enrichment
+_EXTRACTION_SCHEMA = [
+    {"name": "dreamICP",          "type": "string", "description": "plural buyer group, casual titles"},
+    {"name": "company_type",      "type": "string", "description": "specific type of client companies"},
+    {"name": "subniche",          "type": "string", "description": "2-4 word recruiting specialty label"},
+    {"name": "painTheySolve",     "type": "string", "description": "how buyers complain about hiring, 8-15 words lowercase"},
+    {"name": "clean_company_name","type": "string", "description": "company name without legal suffixes"},
+    {"name": "reasoning",         "type": "string", "description": "one sentence explaining niche choice"},
+]
+
+# JSON schema for evaluation enrichment
+_EVALUATION_SCHEMA = [
+    {"name": "specificity",         "type": "number", "description": "0-5"},
+    {"name": "genericness_penalty", "type": "number", "description": "0-5"},
+    {"name": "clarity",             "type": "number", "description": "0-5"},
+    {"name": "role_confusion",      "type": "number", "description": "0 or 1"},
+    {"name": "length_violation",    "type": "number", "description": "0 or 1"},
+    {"name": "total_score",         "type": "number", "description": "calculated composite"},
+    {"name": "issues",              "type": "array",  "description": "list of specific problems"},
+    {"name": "verdict",             "type": "string", "description": "one sentence on why it wins or loses"},
+]
 
 
 def _load_pricing() -> dict:
@@ -89,6 +109,15 @@ def load_config(config_file: str) -> dict:
         return json.load(f)
 
 
+def _load_niche_context(niche: str) -> str:
+    niche_file = ROOT / f"niches/{niche}.txt"
+    try:
+        with open(str(niche_file), "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+
 def process_baseline(row: dict, run_id: int, config_id: int,
                      log_fn=print) -> tuple[dict, dict]:
     lead_start = time.monotonic()
@@ -105,7 +134,17 @@ def process_baseline(row: dict, run_id: int, config_id: int,
         full_email = build_baseline_email(row.get("first_name", "there"), icebreaker)
 
         log_fn(f"  evaluating baseline_{i}...")
-        eval_result, eval_usage = evaluate(full_email)
+        with open(ROOT / "prompts/evaluation.txt", "r", encoding="utf-8") as f:
+            eval_prompt = f.read()
+
+        eval_result, eval_usage = run_enrichment(
+            prompt_text=eval_prompt,
+            context_vars={"full_email": full_email},
+            output_type="json",
+            json_schema=_EVALUATION_SCHEMA,
+            temperature=0.1,
+            max_tokens=1024,
+        )
         _add_usage(usage, eval_usage)
         score = eval_result.get("total_score", 0)
 
@@ -147,24 +186,38 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str,
     lead_start = time.monotonic()
     usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
+    # ── Step 1: Extraction ────────────────────────────────────────────────────
     company_info = "\n\n".join(filter(None, [
         row.get("company_name", ""),
         row.get("short_description", ""),
         row.get("website_summary", ""),
     ]))
+    niche_context = _load_niche_context(niche)
 
     log_fn(f"  extracting...")
-    extraction, ext_usage = extract(company_info, niche=niche)
+    with open(ROOT / "prompts/extraction.txt", "r", encoding="utf-8") as f:
+        extraction_prompt = f.read()
+
+    extraction, ext_usage = run_enrichment(
+        prompt_text=extraction_prompt,
+        context_vars={
+            "niche_context": niche_context,
+            "company_info":  company_info,
+        },
+        output_type="json",
+        json_schema=_EXTRACTION_SCHEMA,
+        temperature=0.2,
+        max_tokens=1024,
+    )
     _add_usage(usage, ext_usage)
     log_fn(f"  -> {extraction.get('dreamICP')} | {extraction.get('subniche')}")
 
     input_id = save_input(run_id, row)
     extraction_id = save_extraction(input_id, run_id, extraction)
 
-    # build context_vars: selected original columns + extracted variables
+    # ── Step 2: Build context for generation ─────────────────────────────────
     cols = context_columns if context_columns is not None else DEFAULT_CONTEXT_COLUMNS
     context_vars = {col: row.get(col) for col in cols if row.get(col)}
-    # extracted variables always included (skip reasoning — internal only)
     context_vars.update({
         k: v for k, v in extraction.items()
         if k != "reasoning" and v
@@ -180,28 +233,41 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str,
             with open(default, "r", encoding="utf-8") as f:
                 prompt_text = f.read()
 
+    # ── Step 3: Generation (N variants) ──────────────────────────────────────
     log_fn(f"  generating {variant_count} variants...")
-    email_bodies, gen_usage = generate_variants(
-        prompt_text=prompt_text,
-        context_vars=context_vars,
-        variant_count=variant_count,
-        temperature=temperature_generation,
-    )
-    _add_usage(usage, gen_usage)
+    with open(ROOT / "prompts/evaluation.txt", "r", encoding="utf-8") as f:
+        eval_prompt = f.read()
 
     variants = []
-    for i, body in enumerate(email_bodies):
-        full_email = assemble_email(first_name=row.get("first_name", "there"), email_body=body)
-        icebreaker_line = body.split("\n")[0].strip()
+    for i in range(variant_count):
+        body, gen_usage = run_enrichment(
+            prompt_text=prompt_text,
+            context_vars=context_vars,
+            output_type="text",
+            temperature=temperature_generation,
+            max_tokens=400,
+        )
+        _add_usage(usage, gen_usage)
+
+        full_email = f"Hey {row.get('first_name', 'there')},\n\n{body}"
+        icebreaker_line = body.split("\n")[0].strip() if body != _INSUF else _INSUF
         angle = ANGLES[i] if i < len(ANGLES) else f"variant_{i+1}"
 
+        # ── Step 4: Evaluate each variant ────────────────────────────────────
         if body == _INSUF:
             log_fn(f"  variant {i+1} ({angle}): INSUFFICIENT_DATA — skipping evaluation")
-            eval_result, eval_usage = {"total_score": 0, "note": "insufficient_data"}, {}
+            eval_result = {"total_score": 0, "note": "insufficient_data"}
             score = 0
         else:
             log_fn(f"  evaluating variant {i+1} ({angle})...")
-            eval_result, eval_usage = evaluate(full_email)
+            eval_result, eval_usage = run_enrichment(
+                prompt_text=eval_prompt,
+                context_vars={"full_email": full_email},
+                output_type="json",
+                json_schema=_EVALUATION_SCHEMA,
+                temperature=0.1,
+                max_tokens=1024,
+            )
             _add_usage(usage, eval_usage)
             score = eval_result.get("total_score", 0)
 
@@ -215,10 +281,11 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str,
         variants.append({"gen_id": gen_id, "icebreaker_line": icebreaker_line,
                          "full_email": full_email, "score": score})
 
-    best_idx = select_best(variants)
+    # ── Step 5: Select best ───────────────────────────────────────────────────
     ranked = sorted(range(len(variants)), key=lambda i: (-variants[i]["score"],
                                                           len(variants[i]["icebreaker_line"])))
     set_ranks([variants[i]["gen_id"] for i in ranked])
+    best_idx = ranked[0]
     best = variants[best_idx]
     log_fn(f"  best: {ANGLES[best_idx]} (score {best['score']})")
 
@@ -285,7 +352,6 @@ def run(
 
     log_fn(f"run_id={run_id} | mode={mode} | source={source_type} | workers={max_workers} | {len(df)} leads\n")
 
-    # thread-safe logging
     log_lock = threading.Lock()
     def safe_log(msg):
         with log_lock:
