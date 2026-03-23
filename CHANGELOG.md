@@ -8,6 +8,24 @@
 
 ---
 
+## [0.6.0] - 2026-03-23 - Generation controls in Streamlit UI
+
+### Added
+- Streamlit sidebar: generation prompt selector (all prompts except extraction/evaluation/blocks)
+- Streamlit sidebar: prompt preview expander (shows raw prompt text before running)
+- Streamlit sidebar: variants per lead slider (1–6, default 3)
+- Streamlit sidebar: generation temperature slider (0.0–1.0, default 0.6)
+- Controls disabled automatically when mode = baseline
+
+### Changed
+- `generate_variants()` — accepts `variant_count` and `temperature` params (defaults preserved)
+- `process_generate()` — accepts and passes `batch_prompt_file`, `variant_count`, `temperature_generation`
+- `run()` — accepts `batch_prompt_file`, `variant_count`, `temperature_generation`
+- Output CSV now includes `variant_N_email` for all N variants dynamically (not hardcoded 1/2/3)
+- `ANGLES` extended to 10 entries to support up to 10 variants
+
+---
+
 ## [0.5.0] - 2026-03-23 - Streamlit frontend + pipeline stability
 
 ### Added

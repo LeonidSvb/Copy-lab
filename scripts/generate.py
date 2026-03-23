@@ -12,10 +12,16 @@ client = OpenAI(
 )
 
 MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-oss-120b")
-VARIANT_COUNT = 3
+DEFAULT_VARIANT_COUNT = 3
+DEFAULT_TEMPERATURE = 0.6
 
 
-def generate_variants(extraction: dict, batch_prompt_file: str = None) -> list[str]:
+def generate_variants(
+    extraction: dict,
+    batch_prompt_file: str = None,
+    variant_count: int = DEFAULT_VARIANT_COUNT,
+    temperature: float = DEFAULT_TEMPERATURE,
+) -> list[str]:
     prompt_path = Path(batch_prompt_file) if batch_prompt_file else (
         ROOT / os.getenv("BATCH_PROMPT", "prompts/batch01_recruiting_q2_connector.txt")
     )
@@ -33,11 +39,11 @@ def generate_variants(extraction: dict, batch_prompt_file: str = None) -> list[s
     )
 
     variants = []
-    for _ in range(VARIANT_COUNT):
+    for _ in range(variant_count):
         response = client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.6,
+            temperature=temperature,
             max_tokens=300,
         )
         body = response.choices[0].message.content.strip()

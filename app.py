@@ -38,6 +38,39 @@ mode = st.sidebar.radio("Mode", ["generate", "baseline"])
 limit_val = st.sidebar.number_input("Limit leads (0 = all)", min_value=0, value=0, step=1)
 limit = int(limit_val) if limit_val > 0 else None
 
+st.sidebar.divider()
+st.sidebar.subheader("Generation settings")
+
+prompt_files = sorted((ROOT / "prompts").glob("*.txt"))
+generation_prompts = [
+    f for f in prompt_files
+    if f.name not in ("extraction.txt", "evaluation.txt", "blocks.txt")
+]
+prompt_names = [f.stem for f in generation_prompts]
+default_prompt = next(
+    (i for i, f in enumerate(generation_prompts) if "batch01" in f.name), 0
+)
+selected_prompt_name = st.sidebar.selectbox(
+    "Generation prompt", prompt_names, index=default_prompt,
+    disabled=(mode == "baseline"),
+)
+selected_prompt_path = str(ROOT / "prompts" / f"{selected_prompt_name}.txt")
+
+with st.sidebar.expander("Preview prompt"):
+    try:
+        st.code(open(selected_prompt_path).read(), language=None)
+    except Exception:
+        st.warning("Could not read prompt file.")
+
+variant_count = st.sidebar.slider(
+    "Variants per lead", min_value=1, max_value=6, value=3,
+    disabled=(mode == "baseline"),
+)
+temperature = st.sidebar.slider(
+    "Generation temperature", min_value=0.0, max_value=1.0, value=0.6, step=0.05,
+    disabled=(mode == "baseline"),
+)
+
 # ── Run tab ────────────────────────────────────────────────────────────────────
 
 tab_run, tab_history = st.tabs(["Run", "History"])
@@ -74,6 +107,9 @@ with tab_run:
                         csv_filename=uploaded_file.name,
                         csv_content=csv_content,
                         output_csv=None,
+                        batch_prompt_file=selected_prompt_path,
+                        variant_count=variant_count,
+                        temperature_generation=temperature,
                     )
 
                     st.success(f"Done. {len(results)} leads processed.")

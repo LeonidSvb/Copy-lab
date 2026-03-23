@@ -17,7 +17,8 @@ from extract import extract
 from generate import generate_variants, assemble_email
 from evaluate import evaluate, select_best
 
-ANGLES = ["observation", "pain", "signal"]
+ANGLES = ["observation", "pain", "signal", "variant_4", "variant_5",
+          "variant_6", "variant_7", "variant_8", "variant_9", "variant_10"]
 
 COLUMN_MAP = {
     "First Name": "first_name",
@@ -101,7 +102,10 @@ def process_baseline(row: dict, run_id: int, config_id: int, log_fn=print) -> di
     }
 
 
-def process_generate(row: dict, run_id: int, config_id: int, niche: str, log_fn=print) -> dict:
+def process_generate(
+    row: dict, run_id: int, config_id: int, niche: str, log_fn=print,
+    batch_prompt_file: str = None, variant_count: int = 3, temperature_generation: float = 0.6,
+) -> dict:
     company_info = "\n\n".join(filter(None, [
         row.get("company_name", ""),
         row.get("short_description", ""),
@@ -115,8 +119,13 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str, log_fn=
     input_id = save_input(run_id, row)
     extraction_id = save_extraction(input_id, run_id, extraction)
 
-    log_fn(f"  generating 3 variants...")
-    email_bodies = generate_variants(extraction)
+    log_fn(f"  generating {variant_count} variants...")
+    email_bodies = generate_variants(
+        extraction,
+        batch_prompt_file=batch_prompt_file,
+        variant_count=variant_count,
+        temperature=temperature_generation,
+    )
 
     variants = []
     for i, body in enumerate(email_bodies):
@@ -145,7 +154,7 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str, log_fn=
     best = variants[best_idx]
     log_fn(f"  best: {ANGLES[best_idx]} (score {best['score']})")
 
-    return {
+    result = {
         "first_name": row.get("first_name"),
         "last_name": row.get("last_name"),
         "email": row.get("email"),
@@ -153,10 +162,10 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str, log_fn=
         "best_angle": ANGLES[best_idx] if best_idx < len(ANGLES) else "",
         "best_score": best["score"],
         "best_full_email": best["full_email"],
-        "variant_1_email": variants[0]["full_email"] if len(variants) > 0 else "",
-        "variant_2_email": variants[1]["full_email"] if len(variants) > 1 else "",
-        "variant_3_email": variants[2]["full_email"] if len(variants) > 2 else "",
     }
+    for i, v in enumerate(variants):
+        result[f"variant_{i+1}_email"] = v["full_email"]
+    return result
 
 
 def run(
@@ -169,6 +178,9 @@ def run(
     df: pd.DataFrame = None,
     csv_filename: str = None,
     csv_content: str = None,
+    batch_prompt_file: str = None,
+    variant_count: int = 3,
+    temperature_generation: float = 0.6,
 ) -> list:
     init_schema()
 
@@ -203,7 +215,12 @@ def run(
             if mode == "baseline":
                 result = process_baseline(row.to_dict(), run_id, config_id, log_fn)
             else:
-                result = process_generate(row.to_dict(), run_id, config_id, niche, log_fn)
+                result = process_generate(
+                    row.to_dict(), run_id, config_id, niche, log_fn,
+                    batch_prompt_file=batch_prompt_file,
+                    variant_count=variant_count,
+                    temperature_generation=temperature_generation,
+                )
             results.append(result)
         except Exception as e:
             log_fn(f"  ERROR: {e}")
