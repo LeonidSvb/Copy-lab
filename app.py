@@ -1,6 +1,5 @@
 import sys
 import io
-import json
 from pathlib import Path
 
 import pandas as pd
@@ -35,8 +34,6 @@ with st.sidebar.expander("Config details"):
     st.json(config_data)
 
 mode = st.sidebar.radio("Mode", ["generate", "baseline"])
-limit_val = st.sidebar.number_input("Limit leads (0 = all)", min_value=0, value=0, step=1)
-limit = int(limit_val) if limit_val > 0 else None
 
 st.sidebar.divider()
 st.sidebar.subheader("Generation settings")
@@ -71,63 +68,108 @@ temperature = st.sidebar.slider(
     disabled=(mode == "baseline"),
 )
 
-# ── Run tab ────────────────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str):
+    log_lines = []
+    log_container = st.empty()
+
+    def log_fn(msg):
+        log_lines.append(str(msg))
+        log_container.code("\n".join(log_lines[-40:]))
+
+    with st.spinner(f"{label}..."):
+        try:
+            results = run(
+                df=pd.read_csv(io.StringIO(csv_content)),
+                config_file=selected_config_path,
+                mode=mode,
+                limit=limit,
+                log_fn=log_fn,
+                csv_filename=filename,
+                csv_content=csv_content,
+                output_csv=None,
+                batch_prompt_file=selected_prompt_path,
+                variant_count=variant_count,
+                temperature_generation=temperature,
+            )
+            st.session_state["results"] = results
+            st.session_state["results_label"] = label
+            st.session_state["results_filename"] = filename
+        except Exception as e:
+            st.error(f"Pipeline error: {e}")
+
+
+def _show_results():
+    results = st.session_state.get("results")
+    if not results:
+        return
+    label = st.session_state.get("results_label", "Run")
+    filename = st.session_state.get("results_filename", "output")
+
+    st.success(f"{label} done — {len(results)} leads processed.")
+    results_df = pd.DataFrame(results)
+    st.dataframe(results_df, use_container_width=True)
+
+    csv_out = results_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download results CSV",
+        csv_out,
+        file_name=f"output_{filename}",
+        mime="text/csv",
+        key="dl_results",
+    )
+
+# ── Tabs ───────────────────────────────────────────────────────────────────────
 
 tab_run, tab_history = st.tabs(["Run", "History"])
 
+# ── Run tab ────────────────────────────────────────────────────────────────────
+
 with tab_run:
-    st.subheader("Upload CSV and run pipeline")
-    uploaded_file = st.file_uploader("CSV file", type=["csv"])
+    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
     if uploaded_file:
         csv_bytes = uploaded_file.read()
         csv_content = csv_bytes.decode("utf-8", errors="replace")
-        df_preview = pd.read_csv(io.StringIO(csv_content))
+        df_full = pd.read_csv(io.StringIO(csv_content))
+        total = len(df_full)
 
-        st.write(f"{len(df_preview)} leads — **{uploaded_file.name}**")
+        # store in session so buttons can access it after rerun
+        st.session_state["csv_content"] = csv_content
+        st.session_state["csv_filename"] = uploaded_file.name
+
+        st.write(f"**{total} leads** loaded from `{uploaded_file.name}`")
         with st.expander("Preview (first 5 rows)"):
-            st.dataframe(df_preview.head(5), use_container_width=True)
+            st.dataframe(df_full.head(5), use_container_width=True)
 
-        if st.button("Run pipeline", type="primary"):
-            log_lines = []
-            log_container = st.empty()
+    # show test/full buttons only when CSV is loaded (persists via session_state)
+    csv_content = st.session_state.get("csv_content")
+    csv_filename = st.session_state.get("csv_filename", "upload.csv")
 
-            def log_fn(msg):
-                log_lines.append(str(msg))
-                log_container.code("\n".join(log_lines[-40:]))
+    if csv_content:
+        df_info = pd.read_csv(io.StringIO(csv_content))
+        total = len(df_info)
 
-            with st.spinner("Processing..."):
-                try:
-                    results = run(
-                        df=pd.read_csv(io.StringIO(csv_content)),
-                        config_file=selected_config_path,
-                        mode=mode,
-                        limit=limit,
-                        log_fn=log_fn,
-                        csv_filename=uploaded_file.name,
-                        csv_content=csv_content,
-                        output_csv=None,
-                        batch_prompt_file=selected_prompt_path,
-                        variant_count=variant_count,
-                        temperature_generation=temperature,
-                    )
+        st.divider()
 
-                    st.success(f"Done. {len(results)} leads processed.")
-                    results_df = pd.DataFrame(results)
+        test_size = st.number_input(
+            "Test run size", min_value=1, max_value=total, value=min(10, total), step=1,
+            help="How many leads to process in the test run",
+        )
 
-                    st.dataframe(results_df, use_container_width=True)
+        col_test, col_full = st.columns([1, 1])
 
-                    csv_out = results_df.to_csv(index=False).encode("utf-8")
-                    st.download_button(
-                        "Download results CSV",
-                        csv_out,
-                        file_name=f"output_{uploaded_file.name}",
-                        mime="text/csv",
-                    )
-                    st.session_state["last_results"] = results
+        with col_test:
+            if st.button(f"Test run — first {test_size} leads", use_container_width=True):
+                _run_pipeline(csv_content, csv_filename, int(test_size), f"Test run ({test_size} leads)")
 
-                except Exception as e:
-                    st.error(f"Pipeline error: {e}")
+        with col_full:
+            if st.button(f"Full run — all {total} leads", type="primary", use_container_width=True):
+                _run_pipeline(csv_content, csv_filename, None, f"Full run ({total} leads)")
+
+        st.divider()
+        _show_results()
 
 # ── History tab ────────────────────────────────────────────────────────────────
 

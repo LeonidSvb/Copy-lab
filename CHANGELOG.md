@@ -8,6 +8,19 @@
 
 ---
 
+## [0.7.0] - 2026-03-23 - Test run / full run flow
+
+### Added
+- Run tab: "Test run — first N leads" button with configurable size (default 10)
+- Run tab: "Full run — all N leads" primary button
+- Results persist in `session_state` — visible after clicking either button without re-uploading CSV
+- CSV content stored in `session_state` on upload — buttons work after page rerun
+
+### Removed
+- "Limit leads" sidebar input — replaced by test/full run buttons
+
+---
+
 ## [0.6.0] - 2026-03-23 - Generation controls in Streamlit UI
 
 ### Added
