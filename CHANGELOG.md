@@ -67,6 +67,35 @@
 - По умолчанию: `first_name`, `email`, `company_name`, `best_score`, `best_full_email`
 - Скрытые колонки включены в CSV download
 
+### Planned — UI cleanup + INSUFFICIENT_DATA fix (next)
+
+**INSUFFICIENT_DATA (~70% rate) — не починено:**
+- Экстракция возвращает хорошие данные для всех лидов (dreamICP, painTheySolve норм)
+- `print()` debug в enrichment.py Streamlit глотает из фоновых потоков — не видно в логах
+- Следующий шаг: перейти на `log_fn` вместо `print()` в enrichment.py, чтобы видеть реальный ответ модели
+
+**Streamlit фичи к применению:**
+- `st.data_editor` — заменить `st.dataframe` в результатах (редактируемая таблица, freeze columns)
+- `@st.fragment` — для запуска отдельного enrichment без перерисовки всей страницы
+- `@st.cache_data` — кэшировать `get_prompts()` и `get_source_files()`
+- `streamlit-aggrid` — не нужен, `st.data_editor` покрывает всё
+
+**scripts/ — cleanup:**
+- Удалить: `extract.py`, `generate.py`, `evaluate.py` (заменены `enrichment.py`)
+- Оставить: `enrichment.py`, `main.py`, `db.py`, `seed_prompts.py`, `tunnel.bat`
+
+**Mode baseline — убрать:**
+- Нужен только для A/B сравнения с existing icebreakers из CSV (Personalisation 1/2/3)
+- В текущем use case не используется — убрать из UI и упростить main.py
+
+**2 preview таблицы в Run tab — убрать дубль:**
+- Сейчас: одна при upload + одна в expander "Preview CSV (first 20 rows)" ниже
+- Оставить одну, убрать дублирование
+
+**Column visibility — уже есть в коде, не применено на сервере:**
+- `st.multiselect("Visible columns")` добавлен в `_show_results()` в v0.15
+- Появляется только после завершения рана — если ран не запущен, не видно
+
 ### Planned — Retry logic
 - Exponential backoff on Groq 429 errors
 
