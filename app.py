@@ -19,7 +19,7 @@ from db import (init_schema, get_runs, get_run_results,
                 get_runs_for_source_file,
                 find_source_file_by_hash, find_source_files_by_name,
                 save_source_file_from_content,
-                get_prompts, save_prompt, delete_prompt)
+                get_prompts, save_prompt, update_prompt, delete_prompt)
 from main import run, load_config, COLUMN_MAP, DEFAULT_CONTEXT_COLUMNS
 
 # init DB schema once on startup
@@ -441,6 +441,88 @@ with tab_run:
                             st.error(f"Could not save: {e}")
                     else:
                         st.warning("Enter a name and prompt text.")
+
+            # edit prompt
+            if db_prompts:
+                with st.expander("✏ Edit prompt"):
+                    edit_name = st.selectbox(
+                        "Select prompt to edit",
+                        [p["name"] for p in db_prompts],
+                        key="edit_prompt_select",
+                    )
+                    edit_p = next((p for p in db_prompts if p["name"] == edit_name), None)
+
+                    # detect selection change — reload fields
+                    if st.session_state.get("_prev_edit_select") != edit_name:
+                        st.session_state["_prev_edit_select"] = edit_name
+                        st.session_state["edit_name"]          = edit_p["name"]
+                        st.session_state["edit_content"]       = edit_p["content"]
+                        st.session_state["edit_notes"]         = edit_p["notes"] or ""
+                        st.session_state["edit_output_type"]   = edit_p.get("output_type", "text")
+                        st.session_state["edit_output_column"] = edit_p.get("output_column") or ""
+                        schema = edit_p.get("json_schema")
+                        st.session_state["edit_schema_fields"] = schema if schema else []
+
+                    if edit_p:
+                        e_name    = st.text_input("Name", key="edit_name")
+                        e_content = st.text_area("Prompt text", height=250, key="edit_content")
+                        e_notes   = st.text_input("Notes", key="edit_notes")
+
+                        e_otype = st.radio(
+                            "Output type", ["text", "json"],
+                            index=0 if st.session_state.get("edit_output_type","text") == "text" else 1,
+                            horizontal=True, key="edit_output_type",
+                        )
+
+                        if e_otype == "text":
+                            e_ocol   = st.text_input("Output column name", key="edit_output_column")
+                            e_schema = None
+                        else:
+                            st.caption("Schema fields — each name = output column.")
+                            if not st.session_state.get("edit_schema_fields"):
+                                st.session_state["edit_schema_fields"] = [{"name":"","type":"string","description":""}]
+
+                            fields = st.session_state["edit_schema_fields"]
+                            updated = []
+                            for fi, field in enumerate(fields):
+                                c1, c2, c3, c4 = st.columns([2, 1, 3, 0.5])
+                                fname = c1.text_input("Name", value=field["name"],
+                                                      key=f"esf_name_{fi}", label_visibility="collapsed",
+                                                      placeholder="field_name")
+                                ftype = c2.selectbox("Type", ["string","number","array"],
+                                                     index=["string","number","array"].index(field.get("type","string")),
+                                                     key=f"esf_type_{fi}", label_visibility="collapsed")
+                                fdesc = c3.text_input("Desc", value=field.get("description",""),
+                                                      key=f"esf_desc_{fi}", label_visibility="collapsed",
+                                                      placeholder="description")
+                                if c4.button("x", key=f"esf_del_{fi}") and len(fields) > 1:
+                                    continue
+                                updated.append({"name": fname, "type": ftype, "description": fdesc})
+                            st.session_state["edit_schema_fields"] = updated
+
+                            if st.button("+ Add field", key="btn_edit_add_field"):
+                                st.session_state["edit_schema_fields"].append({"name":"","type":"string","description":""})
+                                st.rerun()
+
+                            e_ocol   = None
+                            e_schema = [f for f in updated if f["name"].strip()]
+
+                        if st.button("Save changes", key="btn_edit_save", type="primary"):
+                            if e_name and e_content:
+                                try:
+                                    update_prompt(
+                                        edit_p["id"], e_name, e_content,
+                                        e_notes or None,
+                                        output_type=e_otype,
+                                        output_column=e_ocol or None,
+                                        json_schema=e_schema or None,
+                                    )
+                                    st.success(f"Updated: **{e_name}**")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Could not update: {e}")
+                            else:
+                                st.warning("Name and prompt text are required.")
 
             # delete from collection
             if db_prompts:

@@ -494,6 +494,23 @@ def save_prompt(name: str, prompt_type: str, content: str, notes: str = None,
     return pid
 
 
+def update_prompt(prompt_id: int, name: str, content: str, notes: str = None,
+                  output_type: str = "text", output_column: str = None,
+                  json_schema: list = None) -> None:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE prompts
+        SET name = %s, content = %s, notes = %s,
+            output_type = %s, output_column = %s, json_schema = %s
+        WHERE id = %s
+    """, (name, content, notes, output_type, output_column,
+          json.dumps(json_schema) if json_schema else None, prompt_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
 def delete_prompt(prompt_id: int) -> None:
     conn = get_conn()
     cur = conn.cursor()
