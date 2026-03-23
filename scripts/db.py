@@ -1,10 +1,13 @@
+import hashlib
 import json
 import os
 import glob
 import psycopg2
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT = Path(__file__).parent.parent
+load_dotenv(ROOT / ".env")
 
 
 def get_conn():
@@ -31,7 +34,7 @@ def init_schema():
     """)
     conn.commit()
 
-    migration_files = sorted(glob.glob("migrations/*.sql"))
+    migration_files = sorted(glob.glob(str(ROOT / "migrations/*.sql")))
     applied = 0
 
     for path in migration_files:
@@ -51,6 +54,41 @@ def init_schema():
 
     cur.close()
     conn.close()
+
+
+# ── source files ─────────────────────────────────────────────────────────────
+
+def save_source_file(filepath: str) -> int:
+    with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+
+    file_hash = hashlib.md5(content.encode()).hexdigest()
+    row_count = max(content.count("\n") - 1, 0)  # minus header
+    file_size = len(content.encode())
+    filename = Path(filepath).name
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    # return existing if same file already uploaded
+    cur.execute("SELECT id FROM source_files WHERE file_hash = %s", (file_hash,))
+    existing = cur.fetchone()
+    if existing:
+        cur.close()
+        conn.close()
+        print(f"  source file already stored (id={existing[0]})")
+        return existing[0]
+
+    cur.execute("""
+        INSERT INTO source_files (filename, content, file_hash, row_count, file_size)
+        VALUES (%s, %s, %s, %s, %s) RETURNING id
+    """, (filename, content, file_hash, row_count, file_size))
+    sf_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    print(f"  source file stored: {filename} ({row_count} rows, id={sf_id})")
+    return sf_id
 
 
 # ── configs ───────────────────────────────────────────────────────────────────
@@ -77,12 +115,12 @@ def get_or_create_config(name: str, params: dict) -> int:
 
 # ── runs ──────────────────────────────────────────────────────────────────────
 
-def create_run(config_id: int, source: str) -> int:
+def create_run(config_id: int, source: str, source_file_id: int = None) -> int:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO runs (config_id, source) VALUES (%s, %s) RETURNING id",
-        (config_id, source)
+        "INSERT INTO runs (config_id, source, source_file_id) VALUES (%s, %s, %s) RETURNING id",
+        (config_id, source, source_file_id)
     )
     run_id = cur.fetchone()[0]
     conn.commit()
@@ -187,3 +225,72 @@ def set_ranks(gen_ids_by_rank: list[int]):
     conn.commit()
     cur.close()
     conn.close()
+
+
+def save_source_file_from_content(filename: str, content: str) -> int:
+    file_hash = hashlib.md5(content.encode()).hexdigest()
+    row_count = max(content.count("\n") - 1, 0)
+    file_size = len(content.encode())
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id FROM source_files WHERE file_hash = %s", (file_hash,))
+    existing = cur.fetchone()
+    if existing:
+        cur.close()
+        conn.close()
+        return existing[0]
+
+    cur.execute("""
+        INSERT INTO source_files (filename, content, file_hash, row_count, file_size)
+        VALUES (%s, %s, %s, %s, %s) RETURNING id
+    """, (filename, content, file_hash, row_count, file_size))
+    sf_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    return sf_id
+
+
+def get_runs(limit: int = 20) -> list:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT r.id, r.source, r.total_inputs, r.created_at, c.name as config_name
+        FROM runs r
+        LEFT JOIN configs c ON c.id = r.config_id
+        ORDER BY r.created_at DESC
+        LIMIT %s
+    """, (limit,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [
+        {"id": r[0], "source": r[1], "total_inputs": r[2], "created_at": str(r[3]), "config_name": r[4]}
+        for r in rows
+    ]
+
+
+def get_run_results(run_id: int) -> list:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT i.first_name, i.last_name, i.email, i.company_name,
+               g.angle, g.score, g.icebreaker_line, g.full_email, g.evaluation_json
+        FROM generations g
+        JOIN inputs i ON i.id = g.input_id
+        WHERE g.run_id = %s AND g.is_best = true
+        ORDER BY i.id
+    """, (run_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [
+        {
+            "first_name": r[0], "last_name": r[1], "email": r[2], "company_name": r[3],
+            "angle": r[4], "score": r[5], "icebreaker_line": r[6],
+            "full_email": r[7], "evaluation_json": r[8],
+        }
+        for r in rows
+    ]

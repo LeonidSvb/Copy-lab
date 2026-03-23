@@ -88,17 +88,28 @@ docs/
   antifragile_variable_prompts.md   — variable extraction prompts (mentor material)
 ```
 
+## Rules for Claude
+
+- **Never push to GitHub without explicit permission from Leo.** Ask first, always.
+- **Never commit sensitive files** (.env, CSV with leads, output files).
+- **Scripts go in `scripts/`**, never in the project root.
+- **New DB changes = new migration file** (`migrations/00N_description.sql`), never edit existing ones.
+- **Update CHANGELOG.md** on every meaningful change before committing.
+
 ## Running
 
 ```bash
 # Install
 pip install -r requirements.txt
 
-# Test on 3 leads
-python main.py --input "path/to/leads.csv" --output output.csv --limit 3
+# 1. Open SSH tunnel first (separate terminal)
+scripts\tunnel.bat
 
-# Full batch
-python main.py --input "path/to/leads.csv" --output output.csv
+# 2. Test on 3 leads
+python scripts/main.py --input "path/to/leads.csv" --output output.csv --limit 3
+
+# 3. Full batch
+python scripts/main.py --input "path/to/leads.csv" --output output.csv
 ```
 
 ## Environment

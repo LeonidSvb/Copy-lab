@@ -1,10 +1,12 @@
 import json
 import os
 import re
+from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT = Path(__file__).parent.parent
+load_dotenv(ROOT / ".env")
 
 client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
@@ -13,23 +15,23 @@ client = OpenAI(
 
 MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-oss-120b")
 
-with open("prompts/extraction.txt", "r", encoding="utf-8") as f:
-    EXTRACTION_PROMPT = f.read()
-
 
 def load_niche_context(niche: str = "recruiting") -> str:
-    niche_file = f"niches/{niche}.txt"
+    niche_file = ROOT / f"niches/{niche}.txt"
     try:
-        with open(niche_file, "r", encoding="utf-8") as f:
+        with open(str(niche_file), "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         return ""
 
 
 def extract(company_info: str, niche: str = "recruiting") -> dict:
+    with open(ROOT / "prompts/extraction.txt", "r", encoding="utf-8") as f:
+        extraction_prompt = f.read()
+
     niche_context = load_niche_context(niche)
     prompt = (
-        EXTRACTION_PROMPT
+        extraction_prompt
         .replace("{niche_context}", niche_context)
         .replace("{company_info}", company_info)
     )
