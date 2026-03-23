@@ -1,0 +1,10 @@
+{
+  "name": "recruiting_v1",
+  "niche": "recruiting",
+  "batch_prompt": "prompts/batch01_recruiting_q2_connector.txt",
+  "model": "openai/gpt-oss-120b",
+  "temperature_extraction": 0.2,
+  "temperature_generation": 0.6,
+  "temperature_evaluation": 0.1,
+  "variant_count": 3
+}

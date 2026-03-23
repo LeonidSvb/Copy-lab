@@ -1,0 +1,47 @@
+You are evaluating a cold email for quality. Score it strictly — be a tough critic.
+
+FULL EMAIL:
+{full_email}
+
+Score each metric and return ONLY valid JSON:
+
+{
+  "specificity": <0-5>,
+  "genericness_penalty": <0-5>,
+  "clarity": <0-5>,
+  "role_confusion": <0 or 1>,
+  "length_violation": <0 or 1>,
+  "total_score": <calculated>,
+  "issues": ["issue 1", "issue 2"],
+  "verdict": "one sentence on why this wins or loses"
+}
+
+SCORING GUIDE:
+
+specificity (0-5):
+  5 = names a very specific type of company/person with a real pain
+  3 = somewhat specific but could apply to many
+  0 = completely generic, no real signal
+
+genericness_penalty (0-5):
+  0 = no generic phrases (GOOD)
+  5 = full of "solutions", "leverage", "help you grow" (BAD)
+  Penalize: "solutions", "optimize", "streamline", "leverage", "take your X to the next level"
+
+clarity (0-5):
+  5 = reads naturally in one pass, human tone
+  0 = confusing, robotic, or awkward phrasing
+
+role_confusion (0 or 1):
+  1 = email confuses WHO the sender is talking to (e.g., implies sender works with candidates, not hiring managers)
+  0 = roles are clear
+
+length_violation (0 or 1):
+  1 = icebreaker line is more than 2 sentences OR the full email is bloated
+  0 = appropriate length
+
+total_score = specificity + clarity - genericness_penalty - (role_confusion * 3) - (length_violation * 2)
+
+issues = list of specific problems found (empty array if none)
+
+Output ONLY the JSON object, nothing else.

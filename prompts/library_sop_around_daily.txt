@@ -1,0 +1,21 @@
+# Angle 2 — "I'm Around Them Daily" Spine
+# "Figured I'd reach out — I'm around [dreamICP] daily and they keep saying they [painTheySolve]."
+
+Write ONE cold email opener line using the "around them daily" connector angle.
+
+EXTRACTED VARIABLES:
+- dreamICP: {dreamICP}
+- painTheySolve: {painTheySolve}
+
+OUTPUT FORMAT (follow this exactly):
+Figured I'd reach out — I'm around [dreamICP] daily and they keep saying they [painTheySolve].
+
+RULES:
+- ONE sentence only
+- [dreamICP] must be a natural plural group: "CTOs at SaaS startups", "plant managers in food manufacturing" — NOT "decision-makers"
+- [painTheySolve] must sound like a real complaint overheard in a hallway — NOT corporate speak
+- No "optimize", "solutions", "leverage", "streamline", "platform"
+- Tone: insider, plugged-in, operator
+- Must feel like you overheard this from real people, not made up
+
+Output ONLY the single sentence. Nothing else.

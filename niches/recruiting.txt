@@ -1,0 +1,44 @@
+# Niche Context: Recruiting / Staffing
+
+## Who we are reaching out to
+Owners, directors, and senior recruiters at recruiting and staffing agencies.
+
+## Our value prop for this niche
+We monitor the market for companies that are actively mid-search (need to hire right now).
+We connect recruiting agencies to these companies — warm intros, no cold BD needed.
+
+## The key distinction (CRITICAL for extraction)
+Recruiting agencies have two groups:
+- CANDIDATES = the people they place (software engineers, lawyers, accountants, etc.) — this is their PRODUCT
+- CLIENTS/BUYERS = the companies that PAY them to find candidates (CTOs, hiring managers, founders, VPs, etc.) — this is their ICP
+
+When extracting dreamICP, we want the CLIENTS/BUYERS, NOT the candidates.
+
+## dreamICP examples for this niche
+- "CTOs at Series A SaaS startups"
+- "engineering directors at mid-market tech companies"
+- "general counsels at mid-sized law firms"
+- "plant managers at food manufacturing companies"
+- "CFOs at regional banks"
+- "audit directors at mid-market manufacturers"
+- "HR directors at Fortune 500 firms"
+- "founders scaling tech teams"
+- "ops directors at distribution centers"
+
+## painTheySolve examples for this niche (how CLIENTS complain about hiring)
+- "keep burning weeks on senior dev hires that fall through"
+- "keep losing good candidates halfway through the process"
+- "only see the same 10 resumes"
+- "can't close a senior role without it dragging on forever"
+- "never get clear timelines from their current agency"
+- "burn weeks on line staff with no results"
+- "struggle to fill niche roles in a tight market"
+
+## Email template for this niche
+Hey {first_name},
+
+{icebreaker_line}
+
+Most {subniche} agencies hit Q2 with a thin pipeline after a busy Q1. I connect agencies to companies that are mid-search right now — no cold BD, just warm intros.
+
+Worth a quick chat to see if there's a fit?

@@ -1,0 +1,78 @@
+# Prompt Building Blocks
+# Copy-paste the blocks you need into any batch prompt.
+# Each block is self-contained and labeled.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+## [TONE_CASUAL]
+Tone: casual, direct, like a message from a peer — not a sales pitch.
+
+
+## [TONE_OPERATOR]
+Tone: insider, plugged-in, deal-flow operator. You've seen this before.
+Not a sales pitch. Not a cold emailer. Someone who has access.
+
+
+## [PUNCTUATION]
+Use a simple hyphen - not an em dash. No ellipsis. Keep punctuation minimal.
+
+
+## [CAPITALIZATION]
+Always capitalize the word I and the first word of every sentence.
+Do not capitalize common nouns like recruiting, agencies, or staffing.
+
+
+## [NO_CORPORATE_SPEAK]
+Never use: solutions, leverage, optimize, streamline, platform, synergy,
+cutting-edge, innovative, game-changer, scalable, best-in-class,
+I came across your website, impressive company, I hope this finds you well.
+
+
+## [ONE_SENTENCE]
+One sentence only. No exceptions.
+
+
+## [OUTPUT_EMAIL_BODY]
+Return only the finished email body.
+No explanation, no quotes, no subject line, no greeting, no sign-off.
+
+
+## [OUTPUT_ONE_LINE]
+Return only the single line. No explanation, no quotes, no prefix, no suffix.
+
+
+## [NO_HALLUCINATION]
+Base your output only on the data provided.
+If you cannot determine a value from the input, return: insufficient data
+Do not invent facts, names, or signals.
+
+
+## [ANTI_GENERIC_CHECK]
+Before outputting, ask: could this line apply to any company in this industry?
+If yes — rewrite it until it could only apply to this specific company.
+
+
+## [SSM_CONNECTOR_SPINE]
+# Core connector spine from SSM SOP. Rotate only the opener, keep the spine identical.
+# Spine: "I'm around [dreamICP] daily and they keep saying they [painTheySolve]."
+# Opener options (pick one per batch):
+#   "Been mapping some signals lately —"
+#   "Saw some movement on my side —"
+#   "Your name came up on my end —"
+#   "Been curating a few matches this week —"
+#   "Got a signal that fits you —"
+
+
+## [SSM_DREAM_ICP]
+# [dreamICP] rules (from SSM SOP):
+# - Plural group written the way operators talk
+# - Examples: "founders in logistics", "CTOs in SaaS", "plant managers in food manufacturing"
+# - Never: "decision-makers", "stakeholders", "leaders", "professionals"
+
+
+## [SSM_PAIN_THEY_SOLVE]
+# [painTheySolve] rules (from SSM SOP):
+# - How they naturally complain, not corporate jargon
+# - Examples: "can't keep up with hiring", "waste hours chasing updates", "keep losing deals because ops drag"
+# - Must come from input data only — no hallucination
+# - If no real pain exists: return "insufficient data"

@@ -1,0 +1,23 @@
+# Angle 1 — Company-Based Connector Insight
+# "Noticed [company] helps [X] at [Y] — I know a few who [pain]"
+
+Write ONE cold email opener line using the company-based connector angle.
+
+EXTRACTED VARIABLES:
+- clean_company_name: {clean_company_name}
+- dreamICP (job titles): {dream_icp_titles}
+- company_type: {company_type}
+- painTheySolve: {pain_they_solve}
+
+OUTPUT FORMAT (follow this exactly):
+Noticed [clean_company_name] helps [job_titles] at [company_type] — I know a few who [pain_description].
+
+RULES:
+- ONE sentence only
+- [job_titles] = short plural titles: "CTOs", "plant managers", "general counsels" — NOT "decision-makers"
+- [pain_description] = how they complain to a friend: "can't find", "keep losing", "waste weeks on"
+- No corporate speak: no "solutions", "leverage", "optimize", "streamline"
+- Must feel like a genuine observation, not a sales pitch
+- No quotation marks around the output
+
+Output ONLY the single sentence. Nothing else.

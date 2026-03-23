@@ -1,0 +1,34 @@
+# Niche Context: Logistics / Freight / 3PL
+
+## Who we are reaching out to
+Owners and BD directors at logistics companies, 3PLs, freight brokers, carriers.
+
+## Our value prop for this niche
+We monitor the market for companies that are actively looking for logistics partners right now.
+We connect logistics firms to these companies — warm intros, no cold BD needed.
+
+## dreamICP examples for this niche
+- "ops directors at e-commerce brands"
+- "supply chain managers at mid-market manufacturers"
+- "founders scaling DTC brands"
+- "procurement leads at retail chains"
+- "COOs at fast-growing consumer brands"
+
+## painTheySolve examples for this niche
+- "can't find reliable shipping partners who actually move fast"
+- "keep getting burned by carriers who miss windows"
+- "waste hours chasing updates on shipments"
+- "can't scale ops without blowing their freight budget"
+- "keep losing deals because logistics moves too slow"
+
+## Email template for this niche
+Hey {first_name},
+
+{icebreaker_line}
+
+Most {subniche} companies hit Q2 scrambling to cover new lanes after a slow Q1. I connect logistics firms to shippers that are actively looking right now — no cold BD, just warm intros.
+
+Worth a quick chat to see if there's a fit?
+
+## Status
+DRAFT — not yet in production

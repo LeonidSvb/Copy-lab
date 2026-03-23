@@ -1,0 +1,24 @@
+# Angle 3 — "Saw Some Movement" Deal-Flow Opener
+# "Saw some movement on my side — I'm around [dreamICP] daily... Can plug you in."
+
+Write ONE cold email opener line using the deal-flow signal angle.
+
+EXTRACTED VARIABLES:
+- dreamICP: {dreamICP}
+- painTheySolve: {painTheySolve}
+
+OUTPUT FORMAT — ONE sentence, pick one of these openers and finish naturally:
+Option A: "Saw some movement on my side — been around [dreamICP] lately and [painTheySolve] keeps coming up."
+Option B: "Been mapping some signals lately — [dreamICP] keep saying they [painTheySolve]."
+Option C: "Your name came up on my end — I'm around [dreamICP] and they [painTheySolve]."
+
+RULES:
+- ONE sentence only
+- Pick whichever opener sounds most natural for this specific ICP
+- [dreamICP] = natural plural group, casual titles
+- [painTheySolve] = real complaint, not corporate speak
+- Tone: market insider, deal-flow signal, exclusive — not salesy
+- No "optimize", "solutions", "leverage", "streamline", "platform"
+- Must feel like you're reporting live intel, not sending a template
+
+Output ONLY the single sentence. Nothing else.
