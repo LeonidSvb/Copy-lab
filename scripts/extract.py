@@ -25,7 +25,7 @@ def load_niche_context(niche: str = "recruiting") -> str:
         return ""
 
 
-def extract(company_info: str, niche: str = "recruiting") -> dict:
+def extract(company_info: str, niche: str = "recruiting") -> tuple[dict, dict]:
     with open(ROOT / "prompts/extraction.txt", "r", encoding="utf-8") as f:
         extraction_prompt = f.read()
 
@@ -40,8 +40,13 @@ def extract(company_info: str, niche: str = "recruiting") -> dict:
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
-        max_tokens=512,
+        max_tokens=1024,
     )
+
+    usage = {
+        "prompt_tokens":     response.usage.prompt_tokens,
+        "completion_tokens": response.usage.completion_tokens,
+    }
 
     raw = response.choices[0].message.content.strip()
 
@@ -54,4 +59,4 @@ def extract(company_info: str, niche: str = "recruiting") -> dict:
         else:
             raise ValueError(f"Could not parse extraction JSON:\n{raw}")
 
-    return data
+    return data, usage

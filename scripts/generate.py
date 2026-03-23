@@ -21,7 +21,7 @@ def generate_variants(
     batch_prompt_file: str = None,
     variant_count: int = DEFAULT_VARIANT_COUNT,
     temperature: float = DEFAULT_TEMPERATURE,
-) -> list[str]:
+) -> tuple[list[str], dict]:
     prompt_path = Path(batch_prompt_file) if batch_prompt_file else (
         ROOT / os.getenv("BATCH_PROMPT", "prompts/batch01_recruiting_q2_connector.txt")
     )
@@ -39,6 +39,8 @@ def generate_variants(
     )
 
     variants = []
+    usage = {"prompt_tokens": 0, "completion_tokens": 0}
+
     for _ in range(variant_count):
         response = client.chat.completions.create(
             model=MODEL,
@@ -46,10 +48,11 @@ def generate_variants(
             temperature=temperature,
             max_tokens=300,
         )
-        body = response.choices[0].message.content.strip()
-        variants.append(body)
+        usage["prompt_tokens"]     += response.usage.prompt_tokens
+        usage["completion_tokens"] += response.usage.completion_tokens
+        variants.append(response.choices[0].message.content.strip())
 
-    return variants
+    return variants, usage
 
 
 def assemble_email(first_name: str, email_body: str) -> str:

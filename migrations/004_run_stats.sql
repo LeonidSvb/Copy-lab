@@ -1,0 +1,10 @@
+-- Migration 004: run statistics — source, timing, token usage, cost, errors
+
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS source_type   TEXT DEFAULT 'cli';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS completed_at  TIMESTAMPTZ;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS duration_sec  NUMERIC;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS model         TEXT;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS tokens_in     INTEGER DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS tokens_out    INTEGER DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS cost_usd      NUMERIC;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS errors_json   JSONB DEFAULT '[]'::jsonb;

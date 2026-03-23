@@ -1,7 +1,9 @@
+import json
 import os
 import sys
-import json
+import time
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
@@ -11,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 load_dotenv(ROOT / ".env")
 
 from db import (init_schema, get_or_create_config, create_run, update_run_total,
-                save_source_file, save_source_file_from_content,
+                update_run_stats, save_source_file, save_source_file_from_content,
                 save_input, save_extraction, save_generation, set_ranks)
 from extract import extract
 from generate import generate_variants, assemble_email
@@ -42,6 +44,30 @@ BASELINE_BODY_SUFFIX = (
 )
 
 
+def _load_pricing() -> dict:
+    pricing_file = ROOT / "configs/model_pricing.json"
+    try:
+        with open(pricing_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: v for k, v in data.items() if not k.startswith("_")}
+    except FileNotFoundError:
+        return {}
+
+
+def _calc_cost(model: str, tokens_in: int, tokens_out: int) -> float | None:
+    pricing = _load_pricing()
+    if model not in pricing:
+        return None
+    p = pricing[model]
+    return (tokens_in / 1_000_000) * p["input_per_1m"] + \
+           (tokens_out / 1_000_000) * p["output_per_1m"]
+
+
+def _add_usage(total: dict, delta: dict) -> None:
+    total["prompt_tokens"]     += delta.get("prompt_tokens", 0)
+    total["completion_tokens"] += delta.get("completion_tokens", 0)
+
+
 def build_baseline_email(first_name: str, icebreaker: str) -> str:
     greeting = f"Hey {first_name},\n\n"
     if "\n\n" in icebreaker or len(icebreaker) > 200:
@@ -55,7 +81,9 @@ def load_config(config_file: str) -> dict:
         return json.load(f)
 
 
-def process_baseline(row: dict, run_id: int, config_id: int, log_fn=print) -> dict:
+def process_baseline(row: dict, run_id: int, config_id: int,
+                     log_fn=print) -> tuple[dict, dict]:
+    usage = {"prompt_tokens": 0, "completion_tokens": 0}
     input_id = save_input(run_id, row)
 
     variants = []
@@ -68,44 +96,41 @@ def process_baseline(row: dict, run_id: int, config_id: int, log_fn=print) -> di
         full_email = build_baseline_email(row.get("first_name", "there"), icebreaker)
 
         log_fn(f"  evaluating baseline_{i}...")
-        eval_result = evaluate(full_email)
+        eval_result, eval_usage = evaluate(full_email)
+        _add_usage(usage, eval_usage)
         score = eval_result.get("total_score", 0)
 
         gen_id = save_generation(
-            input_id=input_id,
-            run_id=run_id,
-            extraction_id=None,
-            config_id=config_id,
-            variant_index=i,
-            angle=f"baseline_{i}",
-            icebreaker_line=icebreaker,
-            full_email=full_email,
-            score=score,
-            eval_data=eval_result,
+            input_id=input_id, run_id=run_id, extraction_id=None,
+            config_id=config_id, variant_index=i, angle=f"baseline_{i}",
+            icebreaker_line=icebreaker, full_email=full_email,
+            score=score, eval_data=eval_result,
         )
         variants.append({"gen_id": gen_id, "score": score, "full_email": full_email})
 
     if variants:
         ranked = sorted(range(len(variants)), key=lambda i: -variants[i]["score"])
         set_ranks([variants[i]["gen_id"] for i in ranked])
-        best = variants[ranked[0]]
-        log_fn(f"  best baseline score: {best['score']}")
+        log_fn(f"  best baseline score: {variants[ranked[0]]['score']}")
 
-    return {
+    result = {
         "first_name": row.get("first_name"),
-        "last_name": row.get("last_name"),
-        "email": row.get("email"),
+        "last_name":  row.get("last_name"),
+        "email":      row.get("email"),
         "company_name": row.get("company_name"),
         "baseline_1_score": variants[0]["score"] if len(variants) > 0 else None,
         "baseline_2_score": variants[1]["score"] if len(variants) > 1 else None,
         "baseline_3_score": variants[2]["score"] if len(variants) > 2 else None,
     }
+    return result, usage
 
 
-def process_generate(
-    row: dict, run_id: int, config_id: int, niche: str, log_fn=print,
-    batch_prompt_file: str = None, variant_count: int = 3, temperature_generation: float = 0.6,
-) -> dict:
+def process_generate(row: dict, run_id: int, config_id: int, niche: str,
+                     log_fn=print, batch_prompt_file: str = None,
+                     variant_count: int = 3,
+                     temperature_generation: float = 0.6) -> tuple[dict, dict]:
+    usage = {"prompt_tokens": 0, "completion_tokens": 0}
+
     company_info = "\n\n".join(filter(None, [
         row.get("company_name", ""),
         row.get("short_description", ""),
@@ -113,19 +138,21 @@ def process_generate(
     ]))
 
     log_fn(f"  extracting...")
-    extraction = extract(company_info, niche=niche)
+    extraction, ext_usage = extract(company_info, niche=niche)
+    _add_usage(usage, ext_usage)
     log_fn(f"  -> {extraction.get('dreamICP')} | {extraction.get('subniche')}")
 
     input_id = save_input(run_id, row)
     extraction_id = save_extraction(input_id, run_id, extraction)
 
     log_fn(f"  generating {variant_count} variants...")
-    email_bodies = generate_variants(
+    email_bodies, gen_usage = generate_variants(
         extraction,
         batch_prompt_file=batch_prompt_file,
         variant_count=variant_count,
         temperature=temperature_generation,
     )
+    _add_usage(usage, gen_usage)
 
     variants = []
     for i, body in enumerate(email_bodies):
@@ -134,7 +161,8 @@ def process_generate(
         angle = ANGLES[i] if i < len(ANGLES) else f"variant_{i+1}"
 
         log_fn(f"  evaluating variant {i+1} ({angle})...")
-        eval_result = evaluate(full_email)
+        eval_result, eval_usage = evaluate(full_email)
+        _add_usage(usage, eval_usage)
         score = eval_result.get("total_score", 0)
 
         gen_id = save_generation(
@@ -156,16 +184,17 @@ def process_generate(
 
     result = {
         "first_name": row.get("first_name"),
-        "last_name": row.get("last_name"),
-        "email": row.get("email"),
+        "last_name":  row.get("last_name"),
+        "email":      row.get("email"),
         "company_name": row.get("company_name"),
-        "best_angle": ANGLES[best_idx] if best_idx < len(ANGLES) else "",
-        "best_score": best["score"],
+        "best_angle":      ANGLES[best_idx] if best_idx < len(ANGLES) else "",
+        "best_score":      best["score"],
         "best_full_email": best["full_email"],
     }
     for i, v in enumerate(variants):
         result[f"variant_{i+1}_email"] = v["full_email"]
-    return result
+
+    return result, usage
 
 
 def run(
@@ -181,12 +210,14 @@ def run(
     batch_prompt_file: str = None,
     variant_count: int = 3,
     temperature_generation: float = 0.6,
+    source_type: str = "cli",
 ) -> list:
     init_schema()
 
     config = load_config(config_file)
     config_id = get_or_create_config(config["name"], config)
     niche = config.get("niche", "recruiting")
+    model = os.getenv("DEFAULT_MODEL", "openai/gpt-oss-120b")
 
     if df is None:
         df = pd.read_csv(input_csv)
@@ -202,36 +233,66 @@ def run(
         source_file_id = None
 
     source_label = csv_filename or (os.path.basename(input_csv) if input_csv else "upload")
-    run_id = create_run(config_id, source_label, source_file_id)
+    run_id = create_run(config_id, source_label, source_file_id, source_type=source_type)
     update_run_total(run_id, len(df))
 
-    log_fn(f"run_id={run_id} | mode={mode} | {len(df)} leads\n")
+    log_fn(f"run_id={run_id} | mode={mode} | source={source_type} | {len(df)} leads\n")
 
+    total_usage = {"prompt_tokens": 0, "completion_tokens": 0}
+    errors = []
+    started_at = time.monotonic()
     results = []
+
     for idx, row in df.iterrows():
         name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
         log_fn(f"[{idx+1}/{len(df)}] {name} — {row.get('company_name', '')}")
         try:
             if mode == "baseline":
-                result = process_baseline(row.to_dict(), run_id, config_id, log_fn)
+                result, usage = process_baseline(row.to_dict(), run_id, config_id, log_fn)
             else:
-                result = process_generate(
+                result, usage = process_generate(
                     row.to_dict(), run_id, config_id, niche, log_fn,
                     batch_prompt_file=batch_prompt_file,
                     variant_count=variant_count,
                     temperature_generation=temperature_generation,
                 )
+            _add_usage(total_usage, usage)
             results.append(result)
         except Exception as e:
+            err = {
+                "email":      row.get("email", ""),
+                "company":    row.get("company_name", ""),
+                "step":       mode,
+                "message":    str(e),
+                "timestamp":  datetime.now(timezone.utc).isoformat(),
+            }
+            errors.append(err)
             log_fn(f"  ERROR: {e}")
             results.append({"email": row.get("email"), "company_name": row.get("company_name"),
                             "error": str(e)})
 
+    duration_sec = time.monotonic() - started_at
+    cost_usd = _calc_cost(model, total_usage["prompt_tokens"], total_usage["completion_tokens"])
+
+    update_run_stats(
+        run_id=run_id,
+        tokens_in=total_usage["prompt_tokens"],
+        tokens_out=total_usage["completion_tokens"],
+        cost_usd=cost_usd,
+        model=model,
+        duration_sec=duration_sec,
+        errors=errors,
+    )
+
+    cost_str = f"${cost_usd:.4f}" if cost_usd is not None else "cost unknown"
+    log_fn(
+        f"\nDone. {len(results)} leads | {duration_sec:.1f}s | "
+        f"{total_usage['prompt_tokens']}in/{total_usage['completion_tokens']}out tokens | {cost_str}"
+    )
+
     if output_csv:
         pd.DataFrame(results).to_csv(output_csv, index=False)
-        log_fn(f"\nDone. {len(results)} leads -> {output_csv}  (run_id={run_id})")
-    else:
-        log_fn(f"\nDone. {len(results)} leads processed  (run_id={run_id})")
+        log_fn(f"Output: {output_csv}  (run_id={run_id})")
 
     return results
 
@@ -241,9 +302,8 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", default="output.csv")
     parser.add_argument("--config", default="configs/recruiting_v1.json")
-    parser.add_argument("--mode", default="generate", choices=["generate", "baseline"],
-                        help="baseline: evaluate existing icebreakers from CSV | generate: full pipeline")
+    parser.add_argument("--mode", default="generate", choices=["generate", "baseline"])
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
-    run(args.input, args.output, args.config, args.mode, args.limit)
+    run(args.input, args.output, args.config, args.mode, args.limit, source_type="cli")

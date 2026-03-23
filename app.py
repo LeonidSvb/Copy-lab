@@ -10,7 +10,7 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT / "scripts"))
 load_dotenv(ROOT / ".env")
 
-from db import init_schema, get_runs, get_run_results
+from db import init_schema, get_runs, get_run_results, update_run_stats
 from main import run, load_config, COLUMN_MAP
 
 st.set_page_config(page_title="IceGen", layout="wide")
@@ -92,6 +92,7 @@ def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str
                 batch_prompt_file=selected_prompt_path,
                 variant_count=variant_count,
                 temperature_generation=temperature,
+                source_type="streamlit",
             )
             st.session_state["results"] = results
             st.session_state["results_label"] = label

@@ -6,6 +6,31 @@
 
 ## [Unreleased]
 
+### Planned
+- **Parallelism** — `ThreadPoolExecutor` in `run()`, ~10–20 concurrent leads. 400 leads: 50 min → 3–5 min. Groq limit: 1000 RPM / 250K TPM.
+- **Per-lead token tracking** — currently tokens are aggregated per run. Could add `tokens_in/out` to `generations` table for granular cost breakdown per lead.
+- **Retry logic** — exponential backoff on Groq rate limit errors (429).
+- **Email preview in Streamlit** — click a lead in results table → see full email rendered.
+
+---
+
+## [0.8.0] - 2026-03-23 - Run stats: tokens, cost, timing, errors, source tracking
+
+### Added
+- `migrations/004_run_stats.sql` — adds to `runs`: `source_type`, `completed_at`, `duration_sec`, `model`, `tokens_in`, `tokens_out`, `cost_usd`, `errors_json`
+- `configs/model_pricing.json` — pricing table for all Groq models (input/output per 1M tokens). Add new models here, no code changes needed.
+- `db.update_run_stats()` — writes timing, tokens, cost, errors to `runs` at end of pipeline
+- `db.create_run()` — now accepts `source_type` param (`"cli"` or `"streamlit"`)
+- Error logging: each exception captured as `{email, company, step, message, timestamp}` → stored in `runs.errors_json`
+
+### Changed
+- `extract()` — returns `(data, usage)` tuple
+- `generate_variants()` — returns `(variants, usage)` tuple with summed usage across all variant calls
+- `evaluate()` — returns `(data, usage)` tuple
+- `process_generate()` / `process_baseline()` — accumulate usage per lead, return `(result, usage)`
+- `run()` — accumulates total usage across all leads, calculates cost via `model_pricing.json`, logs summary line: `N leads | Xs | Tin/Tout tokens | $X.XXXX`
+- `app.py` — passes `source_type="streamlit"` to `run()`; CLI passes `source_type="cli"`
+
 ---
 
 ## [0.7.0] - 2026-03-23 - Test run / full run flow

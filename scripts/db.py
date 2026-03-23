@@ -115,18 +115,48 @@ def get_or_create_config(name: str, params: dict) -> int:
 
 # ── runs ──────────────────────────────────────────────────────────────────────
 
-def create_run(config_id: int, source: str, source_file_id: int = None) -> int:
+def create_run(config_id: int, source: str, source_file_id: int = None,
+               source_type: str = "cli") -> int:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO runs (config_id, source, source_file_id) VALUES (%s, %s, %s) RETURNING id",
-        (config_id, source, source_file_id)
+        "INSERT INTO runs (config_id, source, source_file_id, source_type) VALUES (%s, %s, %s, %s) RETURNING id",
+        (config_id, source, source_file_id, source_type)
     )
     run_id = cur.fetchone()[0]
     conn.commit()
     cur.close()
     conn.close()
     return run_id
+
+
+def update_run_stats(run_id: int, tokens_in: int, tokens_out: int,
+                     cost_usd: float | None, model: str,
+                     duration_sec: float, errors: list) -> None:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE runs SET
+            completed_at = NOW(),
+            duration_sec = %s,
+            model        = %s,
+            tokens_in    = %s,
+            tokens_out   = %s,
+            cost_usd     = %s,
+            errors_json  = %s
+        WHERE id = %s
+    """, (
+        round(duration_sec, 2),
+        model,
+        tokens_in,
+        tokens_out,
+        round(cost_usd, 6) if cost_usd is not None else None,
+        json.dumps(errors),
+        run_id,
+    ))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
 def update_run_total(run_id: int, total: int):

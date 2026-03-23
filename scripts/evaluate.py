@@ -16,7 +16,7 @@ client = OpenAI(
 MODEL = os.getenv("DEFAULT_MODEL", "openai/gpt-oss-120b")
 
 
-def evaluate(full_email: str) -> dict:
+def evaluate(full_email: str) -> tuple[dict, dict]:
     with open(ROOT / "prompts/evaluation.txt", "r", encoding="utf-8") as f:
         evaluation_prompt = f.read()
 
@@ -28,6 +28,11 @@ def evaluate(full_email: str) -> dict:
         temperature=0.1,
         max_tokens=1024,
     )
+
+    usage = {
+        "prompt_tokens":     response.usage.prompt_tokens,
+        "completion_tokens": response.usage.completion_tokens,
+    }
 
     raw = response.choices[0].message.content.strip()
 
@@ -43,7 +48,7 @@ def evaluate(full_email: str) -> dict:
         else:
             raise ValueError(f"Could not parse evaluation JSON:\n{raw[:300]}")
 
-    return data
+    return data, usage
 
 
 def select_best(variants: list[dict]) -> int:
