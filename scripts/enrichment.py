@@ -92,6 +92,7 @@ def run_enrichment(
     json_schema: list = None,
     temperature: float = 0.3,
     max_tokens: int = 800,
+    log_fn=print,
 ) -> tuple:
     """
     Run a single enrichment call.
@@ -136,12 +137,12 @@ def run_enrichment(
 
     # text output
     if not raw:
-        print("  [enrichment] empty response from model (raw is empty)")
+        log_fn(f"  [enrichment] empty response from model")
         return INSUFFICIENT_DATA, usage
     if raw.strip().upper() == INSUFFICIENT_DATA:
-        print("  [enrichment] model returned INSUFFICIENT_DATA literally")
+        log_fn(f"  [enrichment] model returned INSUFFICIENT_DATA literally")
         return INSUFFICIENT_DATA, usage
     if _is_refusal(raw):
-        print(f"  [enrichment] refusal detected: {raw[:200]!r}")
+        log_fn(f"  [enrichment] refusal detected: {raw[:200]!r}")
         return INSUFFICIENT_DATA, usage
     return raw, usage

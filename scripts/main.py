@@ -38,16 +38,8 @@ COLUMN_MAP = {
     "Company Short Description": "short_description",
     "Title": "title",
     "LinkedIn": "linkedin_url",
-    "Personalisation": "baseline_1",
-    "Personalisation2": "baseline_2",
-    "Personalisation3": "baseline_3",
 }
 
-BASELINE_BODY_SUFFIX = (
-    "\n\nMost recruiting agencies hit Q2 with a thin pipeline after a busy Q1. "
-    "I connect agencies to companies that are mid-search right now - no cold BD, just warm intros.\n\n"
-    "Worth a quick chat to see if there's a fit?"
-)
 
 # JSON schema for extraction enrichment
 _EXTRACTION_SCHEMA = [
@@ -96,13 +88,6 @@ def _add_usage(total: dict, delta: dict) -> None:
     total["completion_tokens"] += delta.get("completion_tokens", 0)
 
 
-def build_baseline_email(first_name: str, icebreaker: str) -> str:
-    greeting = f"Hey {first_name},\n\n"
-    if "\n\n" in icebreaker or len(icebreaker) > 200:
-        return greeting + icebreaker.strip()
-    return greeting + icebreaker.strip() + BASELINE_BODY_SUFFIX
-
-
 def load_config(config_file: str) -> dict:
     path = Path(config_file) if Path(config_file).is_absolute() else ROOT / config_file
     with open(path, "r", encoding="utf-8") as f:
@@ -116,64 +101,6 @@ def _load_niche_context(niche: str) -> str:
             return f.read()
     except FileNotFoundError:
         return ""
-
-
-def process_baseline(row: dict, run_id: int, config_id: int,
-                     log_fn=print) -> tuple[dict, dict]:
-    lead_start = time.monotonic()
-    usage = {"prompt_tokens": 0, "completion_tokens": 0}
-    input_id = save_input(run_id, row)
-
-    variants = []
-    for i in range(1, 4):
-        icebreaker = row.get(f"baseline_{i}", "")
-        if not icebreaker or str(icebreaker).strip().lower() in ("", "nan"):
-            continue
-
-        icebreaker = str(icebreaker).strip()
-        full_email = build_baseline_email(row.get("first_name", "there"), icebreaker)
-
-        log_fn(f"  evaluating baseline_{i}...")
-        with open(ROOT / "prompts/evaluation.txt", "r", encoding="utf-8") as f:
-            eval_prompt = f.read()
-
-        eval_result, eval_usage = run_enrichment(
-            prompt_text=eval_prompt,
-            context_vars={"full_email": full_email},
-            output_type="json",
-            json_schema=_EVALUATION_SCHEMA,
-            temperature=0.1,
-            max_tokens=1024,
-        )
-        _add_usage(usage, eval_usage)
-        score = eval_result.get("total_score", 0)
-
-        gen_id = save_generation(
-            input_id=input_id, run_id=run_id, extraction_id=None,
-            config_id=config_id, variant_index=i, angle=f"baseline_{i}",
-            icebreaker_line=icebreaker, full_email=full_email,
-            score=score, eval_data=eval_result,
-        )
-        variants.append({"gen_id": gen_id, "score": score, "full_email": full_email})
-
-    if variants:
-        ranked = sorted(range(len(variants)), key=lambda i: -variants[i]["score"])
-        set_ranks([variants[i]["gen_id"] for i in ranked])
-        log_fn(f"  best baseline score: {variants[ranked[0]]['score']}")
-
-    update_input_stats(input_id, usage["prompt_tokens"], usage["completion_tokens"],
-                       time.monotonic() - lead_start)
-
-    result = {
-        "first_name":       row.get("first_name"),
-        "last_name":        row.get("last_name"),
-        "email":            row.get("email"),
-        "company_name":     row.get("company_name"),
-        "baseline_1_score": variants[0]["score"] if len(variants) > 0 else None,
-        "baseline_2_score": variants[1]["score"] if len(variants) > 1 else None,
-        "baseline_3_score": variants[2]["score"] if len(variants) > 2 else None,
-    }
-    return result, usage
 
 
 def process_generate(row: dict, run_id: int, config_id: int, niche: str,
@@ -246,6 +173,7 @@ def process_generate(row: dict, run_id: int, config_id: int, niche: str,
             output_type="text",
             temperature=temperature_generation,
             max_tokens=400,
+            log_fn=log_fn,
         )
         _add_usage(usage, gen_usage)
 
@@ -311,7 +239,6 @@ def run(
     input_csv: str = None,
     output_csv: str = "output.csv",
     config_file: str = "configs/recruiting_v1.json",
-    mode: str = "generate",
     limit: int = None,
     log_fn=print,
     df: pd.DataFrame = None,
@@ -350,7 +277,7 @@ def run(
     run_id = create_run(config_id, source_label, source_file_id, source_type=source_type)
     update_run_total(run_id, len(df))
 
-    log_fn(f"run_id={run_id} | mode={mode} | source={source_type} | workers={max_workers} | {len(df)} leads\n")
+    log_fn(f"run_id={run_id} | source={source_type} | workers={max_workers} | {len(df)} leads\n")
 
     log_lock = threading.Lock()
     def safe_log(msg):
@@ -372,17 +299,14 @@ def run(
         try:
             name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
             safe_log(f"[{pos+1}/{total}] {name} — {row.get('company_name', '')}")
-            if mode == "baseline":
-                result, usage = process_baseline(row, run_id, config_id, safe_log)
-            else:
-                result, usage = process_generate(
-                    row, run_id, config_id, niche, safe_log,
-                    prompt_text=prompt_text,
-                    batch_prompt_file=batch_prompt_file,
-                    context_columns=context_columns,
-                    variant_count=variant_count,
-                    temperature_generation=temperature_generation,
-                )
+            result, usage = process_generate(
+                row, run_id, config_id, niche, safe_log,
+                prompt_text=prompt_text,
+                batch_prompt_file=batch_prompt_file,
+                context_columns=context_columns,
+                variant_count=variant_count,
+                temperature_generation=temperature_generation,
+            )
             with usage_lock:
                 _add_usage(total_usage, usage)
                 progress_counter["done"] += 1
@@ -449,10 +373,9 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", default="output.csv")
     parser.add_argument("--config", default="configs/recruiting_v1.json")
-    parser.add_argument("--mode", default="generate", choices=["generate", "baseline"])
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
 
-    run(args.input, args.output, args.config, args.mode, args.limit,
+    run(args.input, args.output, args.config, args.limit,
         source_type="cli", max_workers=args.workers)

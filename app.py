@@ -48,15 +48,12 @@ config_data = load_config(selected_config_path)
 with st.sidebar.expander("Config details"):
     st.json(config_data)
 
-mode = st.sidebar.radio("Mode", ["generate", "baseline"])
-
 st.sidebar.divider()
 st.sidebar.subheader("Generation settings")
 
 variant_count = 1
 temperature = st.sidebar.slider(
     "Generation temperature", min_value=0.0, max_value=1.0, value=0.6, step=0.05,
-    disabled=(mode == "baseline"),
 )
 max_workers = st.sidebar.slider(
     "Parallel workers", min_value=1, max_value=10, value=1,
@@ -92,7 +89,6 @@ def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str
             results = run(
                 df=pd.read_csv(io.StringIO(csv_content)),
                 config_file=selected_config_path,
-                mode=mode,
                 limit=limit,
                 log_fn=log_fn,
                 csv_filename=filename,
@@ -306,8 +302,6 @@ with tab_run:
         # ──────────────────────────────────────────────────────────────────────
 
         st.write(f"**{len(df_full)} leads** — `{uploaded_file.name}`")
-        with st.expander("Preview (first 5 rows)"):
-            st.dataframe(df_full.head(5), use_container_width=True)
 
     csv_content  = st.session_state.get("csv_content")
     csv_filename = st.session_state.get("csv_filename", "upload.csv")
@@ -315,21 +309,24 @@ with tab_run:
 
     # banner when content was loaded from Batches tab (no file uploader)
     if csv_content and not uploaded_file:
-        st.info(f"Loaded from batch: **{csv_filename}**  — switch to Run and press a button below.")
         df_preview = pd.read_csv(io.StringIO(csv_content))
-        st.write(f"**{len(df_preview)} leads**")
-        with st.expander("Preview (first 5 rows)"):
-            st.dataframe(df_preview.head(5), use_container_width=True)
+        st.info(f"Loaded from batch: **{csv_filename}** — {len(df_preview)} leads")
+
+    # single preview table
+    if csv_content:
+        df_peek = pd.read_csv(io.StringIO(csv_content))
+        with st.expander(f"Preview CSV ({len(df_peek)} leads)"):
+            st.dataframe(df_peek.head(20), use_container_width=True)
 
     if csv_content:
-        df_info = pd.read_csv(io.StringIO(csv_content))
-        total   = len(df_info)
+        df_info     = df_peek if 'df_peek' in dir() else pd.read_csv(io.StringIO(csv_content))
+        total       = len(df_info)
         all_columns = list(df_info.columns)
 
         st.divider()
 
         # ── Prompt editor ──────────────────────────────────────────────────────
-        if mode == "generate":
+        if True:
             st.subheader("Prompt")
 
             # load prompts from DB
@@ -555,14 +552,8 @@ with tab_run:
             selected_context_cols = st.multiselect(
                 "Columns", all_columns, default=default_ctx, key="context_cols",
             )
-        else:
-            active_prompt_text    = None
-            selected_context_cols = None
-
         # ── Preview ────────────────────────────────────────────────────────────
         st.divider()
-        with st.expander("Preview CSV (first 20 rows)"):
-            st.dataframe(df_info.head(20), use_container_width=True)
 
         test_size = st.number_input(
             "Test run size", min_value=1, max_value=total,
