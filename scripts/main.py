@@ -266,9 +266,9 @@ def run(
     results = [None] * total
 
     def process_one(pos: int, idx: int, row: dict):
-        name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
-        safe_log(f"[{pos+1}/{total}] {name} — {row.get('company_name', '')}")
         try:
+            name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
+            safe_log(f"[{pos+1}/{total}] {name} — {row.get('company_name', '')}")
             if mode == "baseline":
                 result, usage = process_baseline(row, run_id, config_id, safe_log)
             else:
@@ -282,14 +282,16 @@ def run(
                 _add_usage(total_usage, usage)
             return pos, result, None
         except Exception as e:
+            import traceback
             err = {
                 "email":     row.get("email", ""),
                 "company":   row.get("company_name", ""),
                 "step":      mode,
                 "message":   str(e),
+                "traceback": traceback.format_exc(),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            safe_log(f"  ERROR: {e}")
+            safe_log(f"  ERROR [{row.get('company_name', '')}]: {e}")
             return pos, {"email": row.get("email"), "company_name": row.get("company_name"),
                          "error": str(e)}, err
 

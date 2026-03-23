@@ -87,14 +87,17 @@ max_workers = st.sidebar.slider(
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str):
+    import threading
     log_lines = []
-    log_container = st.empty()
+    log_lock  = threading.Lock()
 
+    # log_fn must NOT touch Streamlit UI — called from worker threads
     def log_fn(msg):
-        log_lines.append(str(msg))
-        log_container.code("\n".join(log_lines[-50:]))
+        with log_lock:
+            log_lines.append(str(msg))
 
     with st.spinner(f"{label}..."):
+        error_msg = None
         try:
             results = run(
                 df=pd.read_csv(io.StringIO(csv_content)),
@@ -111,11 +114,18 @@ def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str
                 source_type="streamlit",
                 max_workers=max_workers,
             )
-            st.session_state["results"] = results
-            st.session_state["results_label"] = label
+            st.session_state["results"]          = results
+            st.session_state["results_label"]    = label
             st.session_state["results_filename"] = filename
         except Exception as e:
-            st.error(f"Pipeline error: {e}")
+            import traceback
+            error_msg = traceback.format_exc()
+            st.error(f"Pipeline error: {e}\n\n```\n{error_msg}\n```")
+
+    # show logs after run completes (safe — main thread)
+    if log_lines:
+        with st.expander("Run log", expanded=(error_msg is not None)):
+            st.code("\n".join(log_lines))
 
 
 def _show_results():
