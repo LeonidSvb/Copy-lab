@@ -1,5 +1,7 @@
 import sys
 import io
+import time
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -87,17 +89,24 @@ max_workers = st.sidebar.slider(
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str):
-    import threading
     log_lines = []
     log_lock  = threading.Lock()
 
-    # log_fn must NOT touch Streamlit UI — called from worker threads
+    # shared state between background thread and main polling loop
+    shared = {"done": 0, "total": 0, "results": None, "error": None}
+
+    # figure out actual lead count for progress bar
+    df_temp = pd.read_csv(io.StringIO(csv_content))
+    shared["total"] = min(limit, len(df_temp)) if limit else len(df_temp)
+
     def log_fn(msg):
         with log_lock:
             log_lines.append(str(msg))
 
-    with st.spinner(f"{label}..."):
-        error_msg = None
+    def progress_fn(done, total):
+        shared["done"] = done
+
+    def run_thread():
         try:
             results = run(
                 df=pd.read_csv(io.StringIO(csv_content)),
@@ -113,18 +122,63 @@ def _run_pipeline(csv_content: str, filename: str, limit: int | None, label: str
                 temperature_generation=temperature,
                 source_type="streamlit",
                 max_workers=max_workers,
+                progress_fn=progress_fn,
             )
-            st.session_state["results"]          = results
-            st.session_state["results_label"]    = label
-            st.session_state["results_filename"] = filename
+            shared["results"] = results
         except Exception as e:
             import traceback
-            error_msg = traceback.format_exc()
-            st.error(f"Pipeline error: {e}\n\n```\n{error_msg}\n```")
+            shared["error"] = f"{e}\n\n{traceback.format_exc()}"
 
-    # show logs after run completes (safe — main thread)
+    # start background thread
+    t = threading.Thread(target=run_thread, daemon=True)
+    t.start()
+    started_at = time.time()
+
+    # ── progress UI (main thread polls every 0.5s) ─────────────────────────────
+    st.markdown(f"**{label}**")
+    progress_bar  = st.progress(0.0)
+    cols          = st.columns(4)
+    ui_processed  = cols[0].empty()
+    ui_remaining  = cols[1].empty()
+    ui_elapsed    = cols[2].empty()
+    ui_eta        = cols[3].empty()
+
+    while t.is_alive():
+        done    = shared["done"]
+        total   = shared["total"]
+        elapsed = time.time() - started_at
+        remain  = total - done
+        rate    = done / elapsed if elapsed > 0 and done > 0 else 0
+        eta_sec = remain / rate if rate > 0 else 0
+
+        progress_bar.progress(done / total if total else 0)
+        ui_processed.metric("Processed",  f"{done} / {total}")
+        ui_remaining.metric("Remaining",  remain)
+        ui_elapsed.metric("Elapsed",      f"{elapsed:.0f}s")
+        ui_eta.metric("ETA",              f"{eta_sec:.0f}s" if eta_sec > 0 else "—")
+        time.sleep(0.5)
+
+    t.join()
+
+    # final state
+    elapsed = time.time() - started_at
+    total   = shared["total"]
+    progress_bar.progress(1.0 if total else 0)
+    ui_processed.metric("Processed",  f"{total} / {total}")
+    ui_remaining.metric("Remaining",  0)
+    ui_elapsed.metric("Elapsed",      f"{elapsed:.0f}s")
+    ui_eta.metric("ETA",              "Done")
+    # ──────────────────────────────────────────────────────────────────────────
+
+    if shared["error"]:
+        st.error(f"Pipeline error: {shared['error']}")
+    elif shared["results"] is not None:
+        st.session_state["results"]          = shared["results"]
+        st.session_state["results_label"]    = label
+        st.session_state["results_filename"] = filename
+
     if log_lines:
-        with st.expander("Run log", expanded=(error_msg is not None)):
+        with st.expander("Run log", expanded=bool(shared["error"])):
             st.code("\n".join(log_lines))
 
 

@@ -223,6 +223,7 @@ def run(
     temperature_generation: float = 0.6,
     source_type: str = "cli",
     max_workers: int = 1,
+    progress_fn=None,   # called as progress_fn(done, total) after each lead
 ) -> list:
     init_schema()
 
@@ -265,6 +266,8 @@ def run(
     total = len(rows)
     results = [None] * total
 
+    progress_counter = {"done": 0}
+
     def process_one(pos: int, idx: int, row: dict):
         try:
             name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
@@ -280,6 +283,9 @@ def run(
                 )
             with usage_lock:
                 _add_usage(total_usage, usage)
+                progress_counter["done"] += 1
+                if progress_fn:
+                    progress_fn(progress_counter["done"], total)
             return pos, result, None
         except Exception as e:
             import traceback
@@ -292,6 +298,10 @@ def run(
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             safe_log(f"  ERROR [{row.get('company_name', '')}]: {e}")
+            with usage_lock:
+                progress_counter["done"] += 1
+                if progress_fn:
+                    progress_fn(progress_counter["done"], total)
             return pos, {"email": row.get("email"), "company_name": row.get("company_name"),
                          "error": str(e)}, err
 
