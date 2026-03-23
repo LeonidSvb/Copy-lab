@@ -7,6 +7,25 @@
 ## [Unreleased]
 
 ### Planned
+- **Retry logic** — exponential backoff on Groq 429 errors
+
+---
+
+## [0.10.0] - 2026-03-23 - Smart duplicate detection + batch run history
+
+### Added
+- `db.find_source_file_by_hash()` — exact duplicate check by MD5
+- `db.find_source_files_by_name()` — name collision check (same name, different content)
+- `db.get_runs_for_source_file()` — all runs for a given batch with stats (leads, config, duration, cost, error count)
+- Upload duplicate logic: exact match → info banner with date + run count; same name different content → warning banner; new file → silent save
+- Batches tab: runs history per selected batch (run_id, leads, config, source_type, duration, cost, error count, date)
+
+### Changed
+- `db.get_runs()` — now returns `source_type`, `duration_sec`, `cost_usd`, `model`
+
+---
+
+## [0.9.0]
 - **Retry logic** — exponential backoff on Groq rate limit errors (429).
 - **Email preview in Streamlit** — click a lead in results table → see full email rendered.
 

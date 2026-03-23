@@ -328,11 +328,45 @@ def save_source_file_from_content(filename: str, content: str) -> int:
     return sf_id
 
 
+def find_source_file_by_hash(file_hash: str) -> dict | None:
+    """Returns existing source_file record if hash matches, else None."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, filename, row_count, file_size, created_at
+        FROM source_files WHERE file_hash = %s
+    """, (file_hash,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "filename": row[1], "row_count": row[2],
+            "file_size": row[3], "created_at": str(row[4])}
+
+
+def find_source_files_by_name(filename: str) -> list:
+    """Returns all source_file records with this filename (different content)."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, filename, row_count, file_size, created_at
+        FROM source_files WHERE filename = %s
+        ORDER BY created_at DESC
+    """, (filename,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [{"id": r[0], "filename": r[1], "row_count": r[2],
+             "file_size": r[3], "created_at": str(r[4])} for r in rows]
+
+
 def get_runs(limit: int = 20) -> list:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        SELECT r.id, r.source, r.total_inputs, r.created_at, c.name as config_name
+        SELECT r.id, r.source, r.total_inputs, r.created_at, c.name as config_name,
+               r.source_type, r.duration_sec, r.cost_usd, r.model
         FROM runs r
         LEFT JOIN configs c ON c.id = r.config_id
         ORDER BY r.created_at DESC
@@ -342,7 +376,33 @@ def get_runs(limit: int = 20) -> list:
     cur.close()
     conn.close()
     return [
-        {"id": r[0], "source": r[1], "total_inputs": r[2], "created_at": str(r[3]), "config_name": r[4]}
+        {"id": r[0], "source": r[1], "total_inputs": r[2], "created_at": str(r[3]),
+         "config_name": r[4], "source_type": r[5], "duration_sec": r[6],
+         "cost_usd": float(r[7]) if r[7] else None, "model": r[8]}
+        for r in rows
+    ]
+
+
+def get_runs_for_source_file(sf_id: int) -> list:
+    """All runs made on a given source_file, with stats."""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT r.id, r.total_inputs, r.source_type, c.name as config_name,
+               r.duration_sec, r.cost_usd, r.model, r.created_at, r.errors_json
+        FROM runs r
+        LEFT JOIN configs c ON c.id = r.config_id
+        WHERE r.source_file_id = %s
+        ORDER BY r.created_at DESC
+    """, (sf_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [
+        {"run_id": r[0], "leads": r[1], "source": r[2], "config": r[3],
+         "duration_sec": r[4], "cost_usd": float(r[5]) if r[5] else None,
+         "model": r[6], "created_at": str(r[7]),
+         "errors": len(r[8]) if r[8] else 0}
         for r in rows
     ]
 

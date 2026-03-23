@@ -10,8 +10,12 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT / "scripts"))
 load_dotenv(ROOT / ".env")
 
+import hashlib
+
 from db import (init_schema, get_runs, get_run_results,
                 get_source_files, get_source_file_content,
+                get_runs_for_source_file,
+                find_source_file_by_hash, find_source_files_by_name,
                 save_source_file_from_content)
 from main import run, load_config, COLUMN_MAP
 
@@ -144,16 +148,36 @@ with tab_run:
         csv_bytes   = uploaded_file.read()
         csv_content = csv_bytes.decode("utf-8", errors="replace")
         df_full     = pd.read_csv(io.StringIO(csv_content))
+        file_hash   = hashlib.md5(csv_content.encode()).hexdigest()
 
-        # save to DB immediately on upload
+        st.session_state["csv_content"]  = csv_content
+        st.session_state["csv_filename"] = uploaded_file.name
+
+        # ── duplicate / name-collision check ──────────────────────────────────
         try:
-            sf_id = save_source_file_from_content(uploaded_file.name, csv_content)
-            st.session_state["csv_content"]  = csv_content
-            st.session_state["csv_filename"] = uploaded_file.name
+            existing = find_source_file_by_hash(file_hash)
+            if existing:
+                prev_runs = get_runs_for_source_file(existing["id"])
+                run_word  = "ран" if len(prev_runs) == 1 else "ранов"
+                st.info(
+                    f"Этот файл уже загружен "
+                    f"({existing['created_at'][:10]}, {existing['row_count']} лидов). "
+                    f"По нему сделано **{len(prev_runs)} {run_word}**. "
+                    f"Можно запустить снова — будет новый ран в истории."
+                )
+            else:
+                # check same name, different content
+                same_name = find_source_files_by_name(uploaded_file.name)
+                if same_name:
+                    st.warning(
+                        f"Файл с именем **{uploaded_file.name}** уже есть в базе "
+                        f"({same_name[0]['created_at'][:10]}), но содержимое другое. "
+                        f"Будет сохранён как новый батч."
+                    )
+                save_source_file_from_content(uploaded_file.name, csv_content)
         except Exception as e:
-            st.warning(f"Could not save to DB: {e}")
-            st.session_state["csv_content"]  = csv_content
-            st.session_state["csv_filename"] = uploaded_file.name
+            st.warning(f"Could not check DB: {e}")
+        # ──────────────────────────────────────────────────────────────────────
 
         st.write(f"**{len(df_full)} leads** — `{uploaded_file.name}`")
         with st.expander("Preview (first 5 rows)"):
@@ -218,15 +242,38 @@ with tab_batches:
                 ),
             )
 
-            if st.button("Load this batch", type="primary"):
-                try:
-                    fname, content = get_source_file_content(selected_batch_id)
-                    st.session_state["csv_content"]  = content
-                    st.session_state["csv_filename"] = fname
-                    st.session_state["results"]      = None
-                    st.success(f"Loaded **{fname}** — switch to Run tab.")
-                except Exception as e:
-                    st.error(f"Could not load batch: {e}")
+            col_load, col_gap = st.columns([1, 2])
+            with col_load:
+                if st.button("Load this batch into Run tab", type="primary"):
+                    try:
+                        fname, content = get_source_file_content(selected_batch_id)
+                        st.session_state["csv_content"]  = content
+                        st.session_state["csv_filename"] = fname
+                        st.session_state["results"]      = None
+                        st.success(f"Loaded **{fname}** — switch to Run tab.")
+                    except Exception as e:
+                        st.error(f"Could not load batch: {e}")
+
+            # runs history for this batch
+            st.divider()
+            st.markdown("**Runs on this batch:**")
+            try:
+                batch_runs = get_runs_for_source_file(selected_batch_id)
+                if not batch_runs:
+                    st.info("No runs yet for this batch.")
+                else:
+                    for r in batch_runs:
+                        dur  = f"{r['duration_sec']:.0f}s" if r["duration_sec"] else "—"
+                        cost = f"${r['cost_usd']:.4f}" if r["cost_usd"] else "—"
+                        errs = f"  ⚠ {r['errors']} errors" if r["errors"] else ""
+                        st.markdown(
+                            f"**Run #{r['run_id']}** — {r['leads']} leads — "
+                            f"`{r['config']}` — `{r['source']}` — "
+                            f"{dur} — {cost}{errs} — "
+                            f"_{r['created_at'][:16]}_"
+                        )
+            except Exception as e:
+                st.warning(f"Could not load run history: {e}")
 
     except Exception as e:
         st.warning(f"Could not connect to DB: {e}")
