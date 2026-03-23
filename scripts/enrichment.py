@@ -136,9 +136,12 @@ def run_enrichment(
 
     # text output
     if not raw:
-        print("  [enrichment] empty response from model")
+        print("  [enrichment] empty response from model (raw is empty)")
+        return INSUFFICIENT_DATA, usage
+    if raw.strip().upper() == INSUFFICIENT_DATA:
+        print("  [enrichment] model returned INSUFFICIENT_DATA literally")
         return INSUFFICIENT_DATA, usage
     if _is_refusal(raw):
-        print(f"  [enrichment] refusal detected: {raw[:120]!r}")
+        print(f"  [enrichment] refusal detected: {raw[:200]!r}")
         return INSUFFICIENT_DATA, usage
     return raw, usage

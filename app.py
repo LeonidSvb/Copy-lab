@@ -53,10 +53,7 @@ mode = st.sidebar.radio("Mode", ["generate", "baseline"])
 st.sidebar.divider()
 st.sidebar.subheader("Generation settings")
 
-variant_count = st.sidebar.slider(
-    "Variants per lead", min_value=1, max_value=6, value=3,
-    disabled=(mode == "baseline"),
-)
+variant_count = 1
 temperature = st.sidebar.slider(
     "Generation temperature", min_value=0.0, max_value=1.0, value=0.6, step=0.05,
     disabled=(mode == "baseline"),
