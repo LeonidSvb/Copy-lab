@@ -4,6 +4,23 @@
 
 ---
 
+## [0.16.0] - 2026-03-24 - Cleanup: remove baseline, fix logging, single preview
+
+### Removed
+- `scripts/extract.py`, `scripts/generate.py`, `scripts/evaluate.py` — replaced by `enrichment.py`
+- Baseline mode — removed from UI, `main.py`, `COLUMN_MAP`, CLI args
+- Variants slider from sidebar (hardcoded n=1; use JSON schema for multi-field output)
+- Duplicate CSV preview in Run tab (was: on upload + expander; now: one expander with lead count)
+
+### Fixed
+- `enrichment.py` — debug messages now use `log_fn` instead of `print()` — appear in UI run log
+- `main.py` — `log_fn` passed through to `run_enrichment()` for generation step
+
+### Changed
+- `CLAUDE.md` — fully rewritten to reflect unified enrichment architecture and current file structure
+
+---
+
 ## [0.15.0] - 2026-03-24 - Unified enrichment architecture
 
 ### Added
